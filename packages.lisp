@@ -1,3 +1,6 @@
+(defpackage :com.hon.test-utils
+  (:use :common-lisp))
+
 (defpackage :com.hon.string-utils
   (:use :common-lisp))
 
