@@ -27,8 +27,18 @@ no characters to process, signals end-of-file."
 reads the first whitespace-delimited word as a string."
   (read-until #'whitespace-char-p input-stream))
 
-;; (handler-case
-;; (with-input-from-string (input-stream "a")
-;;   (loop (print (read-until-whitespace input-stream))))
-;; (end-of-file (e)
-;;   (format t "End of file ~a~%" e)))
+(check-equals "read-until-whitespace"
+  "abc"
+  (with-input-from-string (input-stream "  abc def ghi")
+    (read-until-whitespace input-stream)))
+
+(defun split-string (str delimiter)
+  (loop
+     :for prev-pos = 0 :then (+ (length delimiter) pos)
+     :for pos = (search delimiter str :start2 prev-pos)
+     :collecting (subseq str prev-pos pos)
+     :until (null pos)))
+
+(check-equals "split-string"
+  (list "abc" "def" "ghi")
+  (split-string "abc def ghi" " "))

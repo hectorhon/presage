@@ -48,10 +48,11 @@
                 (values (concatenate 'string line line-2)
                         missing-newline-p-2)))))))
 
-(com.hon.test-utils::check-equals "abc defghi jkl"
-  (with-input-from-string (s "abc defghi jkl
+(check-equals "read-line-with-crlf"
+              "abc defghi jkl"
+              (with-input-from-string (s "abc defghi jkl
 mno pqr")
-    (read-line-with-crlf s)))
+                (read-line-with-crlf s)))
 
 (defmethod parse ((parser parser))
   (with-slots (input-stream state buffer parsed-request) parser
