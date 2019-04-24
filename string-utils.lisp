@@ -28,9 +28,9 @@ reads the first whitespace-delimited word as a string."
   (read-until #'whitespace-char-p input-stream))
 
 (check-equals "read-until-whitespace"
-  "abc"
-  (with-input-from-string (input-stream "  abc def ghi")
-    (read-until-whitespace input-stream)))
+              "abc"
+              (with-input-from-string (input-stream "  abc def ghi")
+                (read-until-whitespace input-stream)))
 
 (defun split-string (str delimiter)
   (loop
@@ -40,5 +40,5 @@ reads the first whitespace-delimited word as a string."
      :until (null pos)))
 
 (check-equals "split-string"
-  (list "abc" "def" "ghi")
-  (split-string "abc def ghi" " "))
+              (list "abc" "def" "ghi")
+              (split-string "abc def ghi" " "))

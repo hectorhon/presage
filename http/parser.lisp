@@ -19,20 +19,6 @@
 :parsing-headers
 :parsing-body
 
-(defclass parser ()
-  ((input-stream :initarg :input-stream)
-   (state :initform :parsing-first-line)
-   (parsed-request :initform (make-instance 'http-request)
-                   :reader parsed-request)))
-
-(defun parse-method-and-target (line)
-  (values "GET" "/home"))
-
-(defun parse-header-line (line)
-  (make-instance 'http-header
-                 :name "content length"
-                 :value "1234"))
-
 (defun read-line-with-crlf (input-stream)
   "Like read-line, but looks for \\r\\n as the line delimiter."
   (multiple-value-bind (line missing-newline-p) (read-line input-stream)
@@ -54,19 +40,42 @@
 mno pqr")
                 (read-line-with-crlf s)))
 
-(defmethod parse ((parser parser))
-  (with-slots (input-stream state buffer parsed-request) parser
-    (ecase state
-      (:parsing-first-line
-       (multiple-value-bind (request-method target)
-           (parse-method-and-target (read-line-with-crlf input-stream))
-         (setf (target parsed-request) target)
-         (setf (request-method parsed-request) request-method)
-         (setf state :parsing-headers)))
-      (:parsing-headers
-       (let ((line (read-line-with-crlf input-stream)))
-         (if (zerop (length line))
-             (setf state :parsing-body)
-             (with-slots (headers) parsed-request
-               (setf headers (cons (parse-header-line line)
-                                   headers)))))))))
+(defun parse-http-request (input-stream)
+  (let ((state :parsing-first-line)
+        (parsed-request (make-instance 'http-request)))
+    (loop (ecase state
+            (:parsing-first-line
+             (let ((line (read-line-with-crlf input-stream)))
+               (destructuring-bind (request-method* target* protocol*)
+                   (com.hon.string-utils:split-string line " ")
+                 (declare (ignore protocol*))
+                 (with-slots (request-method target) parsed-request
+                   (setf request-method request-method*)
+                   (setf target target*)))
+               (setf state :parsing-headers)))
+            (:parsing-headers
+             (let ((line (read-line-with-crlf input-stream)))
+               (destructuring-bind (before-first-colon &rest after-first-colon)
+                   (com.hon.string-utils:split-string line ":")
+                 (let* ((header-name before-first-colon)
+                        (header-value (apply #'concatenate 'string after-first-colon))
+                        (new-http-header (make-instance 'http-header
+                                                        :name (string-trim " " header-name)
+                                                        :value (string-trim " " header-value))))
+                   (setf (headers parsed-request)
+                         (cons new-http-header (headers parsed-request))))
+                 (return parsed-request))))))))
+
+(check-equals "parse-http-request" T
+              (with-input-from-string (input-stream "GET /home/users HTTP/1.1
+User-Agent: Mozilla/4.0 (compatible; MSIE5.01; Windows NT)
+
+")
+                (let ((parsed-request (parse-http-request input-stream)))
+                  (with-slots (request-method target headers) parsed-request
+                    (and (equal "GET" request-method)
+                         (equal "/home/users" target)
+                         (equal 1 (length headers))
+                         (with-slots (name value) (first headers)
+                           (and (equal "User-Agent" name)
+                                (equal "Mozilla/4.0 (compatible; MSIE5.01; Windows NT)" value))))))))
