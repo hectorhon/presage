@@ -5,13 +5,11 @@
 (defpackage :com.hon.string-utils
   (:use :common-lisp
         :com.hon.test-utils)
-  (:export :split-string))
+  (:export :split-string
+           :assoc-value))
 
 (defpackage :com.hon.http
   (:use :common-lisp
+        :sb-bsd-sockets
         :com.hon.test-utils
         :com.hon.string-utils))
-
-(defpackage :com.hon.server
-  (:use :sb-bsd-sockets)
-  (:use :common-lisp))

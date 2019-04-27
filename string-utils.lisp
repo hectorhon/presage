@@ -32,13 +32,38 @@ reads the first whitespace-delimited word as a string."
               (with-input-from-string (input-stream "  abc def ghi")
                 (read-until-whitespace input-stream)))
 
-(defun split-string (str delimiter)
+(defun split-string (str delimiter &optional limit)
   (loop
      :for prev-pos = 0 :then (+ (length delimiter) pos)
      :for pos = (search delimiter str :start2 prev-pos)
-     :collecting (subseq str prev-pos pos)
-     :until (null pos)))
+     :with count = 0
+     :collecting (prog1 (subseq str prev-pos pos) (incf count))
+     :into parts
+     :until (or (if (not (null limit)) (>= count limit))
+                (null pos))
+     :finally (if (not (null pos))
+                  (return (append parts (list (subseq str (+ (length delimiter) pos)))))
+                  (return parts))))
 
 (check-equals "split-string"
               (list "abc" "def" "ghi")
               (split-string "abc def ghi" " "))
+
+(check-equals "split-string with limit"
+              (list "abc" "def ghi")
+              (split-string "abc def ghi" " " 1))
+
+(defun assoc-value (key alist &key (test #'equal))
+  "For an alist with string keys, return the value of the specified key."
+  (cdr (assoc key alist :test test)))
+
+(check-equals "assoc-value"
+              "the value"
+              (assoc-value "the key"
+                           (acons "the key" "the value" nil)))
+
+(check-equals "assoc-value case insensitive"
+              "the value"
+              (assoc-value "the key"
+                           (acons "the KEY" "the value" nil)
+                           :test #'string-equal))

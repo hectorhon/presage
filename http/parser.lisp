@@ -1,11 +1,5 @@
 (in-package :com.hon.http)
 
-(defclass http-header ()
-  ((name :type string
-         :initarg :name)
-   (value :type string
-          :initarg :value)))
-
 (defclass http-request ()
   ((request-method :type string
                    :accessor request-method
@@ -13,7 +7,13 @@
    (target :type string
            :accessor target)
    (headers :initform nil
-            :accessor headers)))
+            :accessor headers
+            :documentation "An alist of headers")
+   (body :type string
+         :accessor body)))
+
+(defun get-header-value (header-name http-request)
+  (assoc-value header-name (headers http-request) :test #'string-equal))
 
 :parsing-first-line
 :parsing-headers
@@ -55,27 +55,55 @@ mno pqr")
                (setf state :parsing-headers)))
             (:parsing-headers
              (let ((line (read-line-with-crlf input-stream)))
-               (destructuring-bind (before-first-colon &rest after-first-colon)
-                   (com.hon.string-utils:split-string line ":")
-                 (let* ((header-name before-first-colon)
-                        (header-value (apply #'concatenate 'string after-first-colon))
-                        (new-http-header (make-instance 'http-header
-                                                        :name (string-trim " " header-name)
-                                                        :value (string-trim " " header-value))))
-                   (setf (headers parsed-request)
-                         (cons new-http-header (headers parsed-request))))
-                 (return parsed-request))))))))
+               (flet ((has-header (header-name)
+                        (not (null (get-header-value header-name parsed-request)))))
+                 (if (equal line "")
+                     (cond ((has-header "Transfer-Encoding")
+                            (error "Transfer-Encoding header not supported"))
+                           ((has-header "Content-Length")
+                            (setf state :parsing-body))
+                           (t (return parsed-request)))
+                     (destructuring-bind (header-name header-value)
+                         (com.hon.string-utils:split-string line ":" 1)
+                       (setf (headers parsed-request)
+                             (acons (string-trim " " header-name)
+                                    (string-trim " " header-value)
+                                    (headers parsed-request))))))))
+            (:parsing-body
+             (setf (body parsed-request)
+                   (loop
+                      :with content-length
+                        = (parse-integer (get-header-value "Content-Length" parsed-request))
+                      :with body = (make-string content-length)
+                      :for i :upfrom 0 :below content-length
+                      :do (setf (char body i) (read-char input-stream))
+                      :finally (return body)))
+             (return parsed-request))))))
 
 (check-equals "parse-http-request" T
               (with-input-from-string (input-stream "GET /home/users HTTP/1.1
 User-Agent: Mozilla/4.0 (compatible; MSIE5.01; Windows NT)
+Host: localhost:8080
 
 ")
                 (let ((parsed-request (parse-http-request input-stream)))
                   (with-slots (request-method target headers) parsed-request
                     (and (equal "GET" request-method)
                          (equal "/home/users" target)
-                         (equal 1 (length headers))
-                         (with-slots (name value) (first headers)
-                           (and (equal "User-Agent" name)
-                                (equal "Mozilla/4.0 (compatible; MSIE5.01; Windows NT)" value))))))))
+                         (equal 2 (length headers))
+                         (equal "Mozilla/4.0 (compatible; MSIE5.01; Windows NT)"
+                                (get-header-value "User-Agent" parsed-request)))))))
+
+(check-equals "parse-http-request with body" T
+              (with-input-from-string (input-stream "POST /home/users HTTP/1.1
+User-Agent: Mozilla/4.0 (compatible; MSIE5.01; Windows NT)
+Host: localhost:8080
+Content-length: 14
+
+some body here")
+                (let ((parsed-request (parse-http-request input-stream)))
+                  (with-slots (request-method target headers body) parsed-request
+                    (and (equal "POST" request-method)
+                         (equal "/home/users" target)
+                         (equal 3 (length headers))
+                         (equal "some body here" body))))))
