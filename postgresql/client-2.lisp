@@ -48,40 +48,47 @@
                 (int 32 :as process-id)
                 (int 32 :as secret-key))
 
-(defparameter *message-format*
-  '(name "Bind" backend nil frontend t
-    fields ((type (byte 1) default #\B)
-            (type (int 32) as length derive-from message-length)
-            (type string as destination-portal-name)
-            (type string as source-prepared-statement-name)
+(eval-when (:compile-toplevel)
+  (defparameter *message-format*
+    '("Bind" from-frontend
+      fields ((byte 1 default #\B)
+              (int 32 as length derive-from message-length)
+              (string as destination-portal-name)
+              (string as source-prepared-statement-name)
 
-            (type (int 16) as parameter-format-codes-count derive-by (counting parameter-format-codes))
-            (type (int-array 16 length-from parameter-format-codes) as parameter-format-codes)
+              (int 16 as parameter-format-codes-count derive-by (counting parameter-format-codes))
+              (int-array 16 as parameter-format-codes)
 
-            (type (int 16) as parameter-values-count derive-by (counting parameter-values))
-            (zero-or-more ((type (int 32) as parameter-value-length-in-bytes derive-by (counting parameter-value))
-                           (type (byte parameter-value-length-in-bytes) as parameter-value))
-             as parameter-values repeat-times parameter-values-count)
+              (int 16 as parameter-values-count derive-by (counting parameter-values))
+              (zero-or-more ((int 32 as parameter-value-length-in-bytes derive-by (counting parameter-value))
+                             (byte as parameter-value))
+               as parameter-values)
 
-            (type (int 16) as result-column-format-codes-count derive-by (counting result-column-format-codes))
-            (type (int-array 16 length-from result-column-format-codes) as result-column-format-codes))))
+              (int 16 as result-column-format-codes-count derive-by (counting result-column-format-codes))
+              (int-array 16 as result-column-format-codes))))
 
-(defmacro message-length (fields)
-  (let ((lengths (mapcar (lambda (field)
-                           (let ((type (getf field 'type)))
-                             (cond ((eq 'string type) `(length ,(getf field 'as)))
-                                   ((consp type) (ecase (car type)
-                                                   ((int byte) (second type))
-                                                   (int-array `(* ,(second type)
-                                                                  (length ,(getf type 'length-from))))))
-                                   ((null type) 0) ;; zero-or-more type
-                                   (t (error "xxx")))))
-                         (eval fields))))
-    `(reduce '+ (list ,@lengths))))
+  (defun get* (list key &key (required t))
+    "Get the value of a key from a (possibly malformed) property list."
+    (let ((tail (member key list)))
+      (if (and required (null tail))
+          (error "Required key ~a is missing from ~a" key list)
+          (second tail))))
+
+  (defun field-length (field-format)
+    (ecase (first field-format)
+      ((byte int) (second field-format))
+      (string `(length ,(get* field-format 'as)))
+      (int-array 0)
+      (zero-or-more 0))))
+
+(defmacro message-length (message-format)
+  (let ((field-lengths
+         (mapcar 'field-length (get* (symbol-value message-format) 'fields))))
+    `(reduce '+ (list ,@field-lengths))))
 
 (defun send-bind-message (destination-portal-name
                           source-prepared-statement-name
                           parameter-format-codes
                           parameter-values
                           result-column-format-codes)
-  (message-length (getf *message-format* 'fields)))
+  (message-length *message-format*))
