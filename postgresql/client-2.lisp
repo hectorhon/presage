@@ -49,9 +49,9 @@
 ;;                 (int 32 :as secret-key))
 
 (eval-when (:compile-toplevel)
-  (defparameter *message-format*
+  (defparameter *bind-message-format*
     '("Bind" from-frontend
-      fields ((byte 1 default #\B)
+      fields ((byte 1 derive-by (fixed-value #\B))
               (int 32 as length derive-by (computing message-length))
               (string as destination-portal-name)
               (string as source-prepared-statement-name)
@@ -77,46 +77,63 @@
 
 (eval-when (:compile-toplevel)
   (defun message-length (field-formats)
+    "Given the field formats, generate the form to calculate the message length."
     (let ((field-lengths
            (mapcar (lambda (field-format)
-                     (ecase (first field-format)
-                       (int          (second field-format))
-                       (byte         (if (integerp (second field-format))
-                                         (second field-format)
-                                         `(length ,(get* field-format 'as))))
-                       (string       `(length ,(get* field-format 'as)))
-                       (int-array    `(* ,(second field-format) (length ,(get* field-format 'as))))
-                       (zero-or-more `(reduce '+ (mapcar (lambda (parameter-value) ; TODO Use &rest?
-                                                           ,(message-length (second field-format)))
-                                                         ,(get* field-format 'as))))))
+                     (let ((arg-name (get* field-format 'as :required nil)))
+                       (ecase (first field-format)
+                         (int          (second field-format))
+                         (byte         (if (integerp (second field-format))
+                                           (second field-format)
+                                           `(length ,arg-name)))
+                         (string       `(length ,arg-name))
+                         (int-array    `(* ,(second field-format) (length ,arg-name)))
+                         (zero-or-more (let* ((field-formats (second field-format))
+                                              (args (mapcan (lambda (field-format)
+                                                              (unless (member 'derive-by field-format)
+                                                                (list (get* field-format 'as))))
+                                                            field-formats)))
+                                         `(reduce '+ (mapcar (lambda ,args
+                                                               ,(message-length (second field-format)))
+                                                             ,(get* field-format 'as))))))))
                    field-formats)))
       `(reduce '+ (list ,@field-lengths)))))
 
-(defmacro send (message-format)
-  (let ((field-formats (get* (symbol-value message-format) 'fields)))
-    `(progn ,@(loop :for field-format in field-formats
+(eval-when (:compile-toplevel)
+  (defun message-contents (field-formats)
+    "Given the field formats, generate the form to send the message."
+    `(progn ,@(loop :for field-format :in field-formats
                  :collect (let* ((arg-name      (get* field-format 'as        :required nil))
-                                 (default-value (get* field-format 'default   :required nil))
                                  (derivation    (get* field-format 'derive-by :required nil))
                                  (value (cond (derivation
                                                (destructuring-bind (derive-method info) derivation
                                                  (ecase derive-method
                                                    (counting `(length ,info))
+                                                   (fixed-value info)
                                                    (computing (ecase info
                                                                 (message-length (message-length field-formats)))))))
-                                              (default-value default-value)
                                               (t arg-name))))
                             (ecase (first field-format)
-                              (byte `(format t "write byte ~a~%" ,value))
-                              (int `(format t "write int ~a~%" ,value))
-                              (string `(format t "write string ~a~%" ,value))
-                              (int-array `(format t "write int array ~a~%" ,value))
-                              (zero-or-more `(format t "zom~%")))))))) ; TODO
+                              (byte          `(format t "write byte ~a~%" ,value))
+                              (int           `(format t "write int ~a~%" ,value))
+                              (string        `(format t "write string ~a~%" ,value))
+                              (int-array     `(format t "write int array ~a~%" ,value))
+                              (zero-or-more  (let* ((field-formats (second field-format))
+                                                    (args (mapcan (lambda (field-format)
+                                                                    (unless (member 'derive-by field-format)
+                                                                      (list (get* field-format 'as))))
+                                                                  field-formats)))
+                                               `(loop :for ,args :in ,value
+                                                   :do ,(message-contents field-formats))))))))))
+
+(defmacro send (message-format-symbol)
+  (let* ((message-format (symbol-value message-format-symbol))
+         (field-formats (get* message-format 'fields)))
+    (message-contents field-formats)))
 
 (defun send-bind-message (destination-portal-name
                           source-prepared-statement-name
                           parameter-format-codes
                           parameter-values
                           result-column-format-codes)
-  (send *message-format*)
-  (message-length (get* *message-format* 'fields)))
+  (send *bind-message-format*))
