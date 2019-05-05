@@ -49,6 +49,16 @@
 ;;                 (int 32 :as secret-key))
 
 (eval-when (:compile-toplevel)
+  (defparameter *startup-message-message-format*
+    '("StartupMessage" from-frontend
+      fields ((int 32 as length derive-by (computing message-length))
+              (int 32 derive-by (fixed-value 196608))
+              (string derive-by (fixed-value "user"))
+              (string as user)
+              (string derive-by (fixed-value "database"))
+              (string as database)))))
+
+(eval-when (:compile-toplevel)
   (defparameter *bind-message-format*
     '("Bind" from-frontend
       fields ((byte 1 derive-by (fixed-value #\B))
@@ -86,7 +96,12 @@
                          (byte         (if (integerp (second field-format))
                                            (second field-format)
                                            `(length ,arg-name)))
-                         (string       `(length ,arg-name))
+                         (string       (let ((derivation (get* field-format 'derive-by :required nil)))
+                                         (if derivation
+                                             (if (eq 'fixed-value (first derivation))
+                                                 (1+ (length (second derivation)))
+                                                 (error "Only fixed values are supported for string length derivation."))
+                                             `(1+ (length ,arg-name)))))
                          (int-array    `(* ,(second field-format) (length ,arg-name)))
                          (zero-or-more (let* ((field-formats (second field-format))
                                               (args (mapcan (lambda (field-format)
@@ -115,7 +130,9 @@
                                               (t arg-name))))
                             (ecase (first field-format)
                               (byte          `(format t "write byte ~a~%" ,value))
-                              (int           `(format t "write int ~a~%" ,value))
+                              (int           (ecase (second field-format)
+                                               (16 `(format t "write int16 ~a~%" ,value))
+                                               (32 `(format t "write int32 ~a~%" ,value))))
                               (string        `(format t "write string ~a~%" ,value))
                               (int-array     `(format t "write int array ~a~%" ,value))
                               (zero-or-more  (let* ((field-formats (second field-format))
@@ -131,9 +148,14 @@
          (field-formats (get* message-format 'fields)))
     (message-contents field-formats)))
 
+
+
 (defun send-bind-message (destination-portal-name
                           source-prepared-statement-name
                           parameter-format-codes
                           parameter-values
                           result-column-format-codes)
   (send *bind-message-format*))
+
+(defun send-startup-message-message (user database)
+  (send *startup-message-message-format*))
