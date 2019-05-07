@@ -56,7 +56,8 @@
               (string derive-by (fixed-value "user"))
               (string as user)
               (string derive-by (fixed-value "database"))
-              (string as database)))))
+              (string as database)
+              (byte 1 derive-by (fixed-value #\0))))))
 
 (eval-when (:compile-toplevel)
   (defparameter *bind-message-format*

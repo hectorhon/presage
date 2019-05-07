@@ -27,7 +27,8 @@
                             (1+ (length "user")) ; user parameter name, including null terminator
                             (1+ (length user)) ; user, including null terminator
                             (1+ (length "database")) ; database parameter name, including null terminator
-                            (1+ (length database))) ; database, including null terminator
+                            (1+ (length database)) ; database, including null terminator
+                            1) ; a zero byte is required as a terminator after last name value pair
           )))
 
 (defmethod send ((startup-message startup-message) stream)
@@ -37,7 +38,8 @@
     (write-null-terminated-string "user" stream)
     (write-null-terminated-string user stream)
     (write-null-terminated-string "database" stream)
-    (write-null-terminated-string database stream)))
+    (write-null-terminated-string database stream)
+    (write-byte 0 stream))) ; a zero byte is required as a terminator after last name value pair
 
 (defun test2 ()
   (with-open-file (stream "test.bin" :direction :output :element-type :default :if-exists :supersede)
@@ -46,21 +48,27 @@
       (send message stream))))
 
 (defun test ()
-  (let ((socket (make-instance 'local-socket :type :stream)))
-    (setf (sockopt-reuse-address socket) t)
-    (unwind-protect
-         (progn (socket-connect socket "/var/run/postgresql/.s.PGSQL.5432")
-                (let* ((socket-stream
-                        (socket-make-stream socket :input t :output t :timeout 5 :element-type :default))
-                       (message
-                        (make-instance 'startup-message :user "presage")))
-                  (print "sending message...")
-                  (send message socket-stream)
-                  (finish-output socket-stream)
-                  (print "message sent.")
-                  (loop (progn (print "reading...")
-                               (print (read-byte socket-stream))
-                               (print "read a byte.")))))
-      (socket-shutdown socket :direction :io)
-      (socket-close socket)
-      (print "socket closed"))))
+  (with-open-file (fs "test.bin" :direction :output :element-type :default :if-exists :supersede)
+    (let ((socket (make-instance 'local-socket :type :stream)))
+      (setf (sockopt-reuse-address socket) t)
+      (unwind-protect
+           (progn (socket-connect socket "/var/run/postgresql/.s.PGSQL.5432")
+                  (let* ((socket-stream
+                          (socket-make-stream socket :input t :output t :timeout 5 :element-type :default))
+                         (message
+                          (make-instance 'startup-message :user "presage")))
+                    (print "sending message...")
+                    (send message socket-stream)
+                    (finish-output socket-stream)
+                    (print "message sent.")
+                    (loop (progn (print "reading...")
+                                 (let ((byte (handler-case (read-byte socket-stream)
+                                               (end-of-file () (return))
+                                               (sb-sys:io-timeout () (return)))))
+                                   (print byte)
+                                   (write-byte byte fs)
+                                   (finish-output fs))
+                                 (print "read a byte.")))))
+        (socket-shutdown socket :direction :io)
+        (socket-close socket)
+        (print "socket closed")))))
