@@ -49,15 +49,30 @@
 ;;                 (int 32 :as secret-key))
 
 (eval-when (:compile-toplevel)
-  (defparameter *startup-message-message-format*
-    '("StartupMessage" from-frontend
-      fields ((int 32 as length derive-by (computing message-length))
-              (int 32 derive-by (fixed-value 196608))
-              (string derive-by (fixed-value "user"))
-              (string as user)
-              (string derive-by (fixed-value "database"))
-              (string as database)
-              (byte 1 derive-by (fixed-value #\0))))))
+  (defparameter *message-formats* ()))
+
+(defmacro define-message-format (symbol &body fields)
+  `(eval-when (:compile-toplevel)
+     (defparameter ,symbol (quote ,fields))
+     (push ,symbol *message-formats*)))
+
+(define-message-format *startup-message-message-format*
+  "StartupMessage" from-frontend
+  fields ((int 32 as length derive-by (computing message-length))
+          (int 32 derive-by (fixed-value 196608))
+          (string derive-by (fixed-value "user"))
+          (string as user)
+          (string derive-by (fixed-value "database"))
+          (string as database)
+          (byte 1 derive-by (fixed-value #\0))))
+
+(eval-when (:compile-toplevel)
+  (defparameter *authentication-md5-password-message-format*
+    '("AuthenticationMD5Password" from-backend
+      fields ((byte 1 derive-by (fixed-value #\R))
+              (int 32 derive-by (fixed-value 12))
+              (int 32 derive-by (fixed-value 5))
+              (byte 4 as salt)))))
 
 (eval-when (:compile-toplevel)
   (defparameter *bind-message-format*
@@ -148,6 +163,16 @@
   (let* ((message-format (symbol-value message-format-symbol))
          (field-formats (get* message-format 'fields)))
     (message-contents field-formats)))
+
+
+
+(defun parse (stream)
+  "Does not work for StartupMessage."
+  (let ((first-byte (read-byte stream)))
+    (remove-if (complement (lambda (message-format)
+                             (let ((field-formats (get* message-format 'fields)))
+                               (eql first-byte (first field-formats)))))
+               *message-formats*)))
 
 
 
