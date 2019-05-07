@@ -93,7 +93,7 @@
            (mapcar (lambda (field-format)
                      (let ((arg-name (get* field-format 'as :required nil)))
                        (ecase (first field-format)
-                         (int          (second field-format))
+                         (int          (/ (second field-format) 8))
                          (byte         (if (integerp (second field-format))
                                            (second field-format)
                                            `(length ,arg-name)))
