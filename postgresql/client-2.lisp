@@ -1,59 +1,11 @@
 ;; (in-package :com.hon.postgresql)
 
-;; (message-format "AuthenticationOk" :backend t :frontend nil
-;;                 (byte 1 :default #\R)
-;;                 (int 32 :default 8)
-;;                 (int 32 :default 0))
-
-;; (message-format "AuthenticationKerberosV5" :backend t :frontend nil
-;;                 (byte 1 :default #\R)
-;;                 (int 32 :default 8)
-;;                 (int 32 :default 2))
-
-;; (message-format "AuthenticationCleartextPassword" :backend t :frontend nil
-;;                 (byte 1 :default #\R)
-;;                 (int 32 :default 8)
-;;                 (int 32 :default 3))
-
-;; (message-format "AuthenticationMD5Password" :backend t :frontend nil
-;;                 (byte 1 :default #\R)
-;;                 (int 32 :default 12)
-;;                 (int 32 :default 5)
-;;                 (byte 4 :as salt))
-
-;; (message-format "AuthenticationSCMCredential" :backend t :frontend nil
-;;                 (byte 1 :default #\R)
-;;                 (int 32 :default 8)
-;;                 (int 32 :default 6))
-
-;; (message-format "AuthenticationGSS" :backend t :frontend nil
-;;                 (byte 1 :default #\R)
-;;                 (int 32 :default 8)
-;;                 (int 32 :default 7))
-
-;; (message-format "AuthenticationSSPI" :backend t :frontend nil
-;;                 (byte 1 :default #\R)
-;;                 (int 32 :default 8)
-;;                 (int 32 :default 9))
-
-;; (message-format "AuthenticationGSSContinue" :backend t :frontend nil
-;;                 (byte 1 :default #\R)
-;;                 (int 32 :as length)
-;;                 (int 32 :default 8)
-;;                 (byte nil :as gssapi-or-sspi-authentication-data))
-
-;; (message-format "BackendKeyData" :backend t :frontend nil
-;;                 (byte 1 :default #\K)
-;;                 (int 32 :default 12)
-;;                 (int 32 :as process-id)
-;;                 (int 32 :as secret-key))
-
 (eval-when (:compile-toplevel)
   (defparameter *message-formats* ()))
 
-(defmacro define-message-format (symbol &body fields)
+(defmacro define-message-format (symbol &body definition)
   `(eval-when (:compile-toplevel)
-     (defparameter ,symbol (quote ,fields))
+     (defparameter ,symbol (quote ,definition))
      (push ,symbol *message-formats*)))
 
 (define-message-format *startup-message-message-format*
@@ -65,6 +17,13 @@
           (string derive-by (fixed-value "database"))
           (string as database)
           (byte 1 derive-by (fixed-value #\0))))
+
+(define-message-format *authentication-md5-password-message-format*
+  "AuthenticationMD5Password" from-backend
+  fields ((byte 1 derive-by (fixed-value #\R))
+          (int 32 as length derived-by (fixed-value 12))
+          (int 32 derive-by (fixed-value 5))
+          (byte 4 as salt)))
 
 (eval-when (:compile-toplevel)
   (defparameter *authentication-md5-password-message-format*
@@ -166,13 +125,56 @@
 
 
 
+(eval-when (:compile-toplevel)
+  (defun get-message-format-predefined-first-byte (message-format)
+    "Does not work for StartupMessage, for which it will return NIL."
+    (if (string= "StartupMessage" (first message-format))
+        (return-from get-message-format-predefined-first-byte nil))
+    (let* ((first-field-format     (first (get* message-format 'fields)))
+           (first-field-derivation (or (get* first-field-format 'derive-by)
+                                       (error "First byte in message formats should be predefined."))))
+      (or (get* first-field-derivation 'fixed-value)
+          (error "First byte in message formats should be predefined."))))
+  (defparameter *message-formats-bytes-alist*
+    (mapcar (lambda (message-format)
+              (cons (get-message-format-predefined-first-byte message-format)
+                    message-format))
+            *message-formats*)))
+
 (defun parse (stream)
   "Does not work for StartupMessage."
-  (let ((first-byte (read-byte stream)))
-    (remove-if (complement (lambda (message-format)
-                             (let ((field-formats (get* message-format 'fields)))
-                               (eql first-byte (first field-formats)))))
-               *message-formats*)))
+  (let* ((first-byte (read-byte stream))
+         (candidates (mapcar 'second
+                             (remove-if (lambda (entry) (not (eql (first entry) first-byte)))
+                                        *message-formats-bytes-alist*))))
+    (if (endp candidates)
+        (error "First byte ~a does not match any known message formats" first-byte))
+    (loop :with field-index = 1 ; because first byte in the field formats is already parsed
+       :and parsed-fields = ()
+       :do (flet ((get-current-field-format (message-format)
+                    (nth field-index (get* message-format 'fields)))
+                  (get-field-type (field-format)
+                    (subseq field-format 0 2))
+                  (get-field-name (field-format)
+                    (get* field-format 'as))
+                  (add-to-parsed-fields (key-value-pair)
+                    (destructuring-bind (key value) key-value-pair
+                      (push parsed-fields value)
+                      (push parsed-fields key)))
+                  (parse-current-field-from-stream ()
+                    
+                    ))
+             (let* ((field-types (mapcar (lambda (candidate)
+                                           (get-field-type (get-current-field-format candidate)))
+                                         candidates))
+                    (expected-field-type (first field-types)) ; expected-field-type example is (int 32)
+                    (current-field-among-candidates-has-same-type-and-name
+                     and (mapcar (lambda (field-type) (equal expected-field-type field-type)) field-types)))
+               (if 
+             (ensure-current-field-among-candidates-has-same-type-and-name)
+             (add-to-parsed-fields (parse-current-field-from-stream))
+             (incf field-index))
+       :until (<= 1 (length candidates)))))
 
 
 
