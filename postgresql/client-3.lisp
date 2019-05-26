@@ -6,20 +6,26 @@
 (defmacro filter (predicate sequence)
   `(remove-if (complement ,predicate) ,sequence))
 
-(defmacro exactly-one-element-p (list)
+(defun exactly-one-element-p (list)
   "Tests that the list has exactly one element."
-  `(and (car ,list) (not (cdr ,list))))
+  (and (car list) (not (cdr list))))
 
 (defmacro compose (g f)
   "(compose g f) == (g . f) (x) == (g(f(x)))"
   `(lambda (&rest args)
      (apply ',g (list (apply ',f args)))))
 
+(defmacro intern* (string-or-symbol &optional (package *package*))
+  "Similar to #'intern, but convert to uppercase before interning."
+  `(intern (string-upcase ,string-or-symbol) ,package))
+
 (defun lists-equal (lists)
   "Ensure that all lists are #'equal. Short circuiting makes it better
    than #'reduce..?"
-  (if (equal (car lists) (cadr lists))
-      (lists-equal (cdr lists))))
+  (cond ((null lists) t)
+        ((exactly-one-element-p lists) t)
+        (t (if (equal (car lists) (cadr lists))
+               (lists-equal (cdr lists))))))
 
 
 
@@ -93,6 +99,14 @@
      (data-type  :type message-data-type :initarg :data-type  :reader data-type)
      (derivation :type t                 :initarg :derivation)))
 
+  (defun fixed-field-p (field-format)
+    (declare (field-format field-format))
+    (slot-boundp (data-type field-format) 'exact-value))
+
+  (defun derived-field-p (field-format)
+    (declare (field-format field-format))
+    (slot-boundp field-format 'derivation))
+
   (defclass message-format ()
     ((format-name :type string                :initarg :format-name :reader format-name)
      (source      :type symbol                :initarg :source      :reader source) ; 'backend or 'frontend
@@ -136,7 +150,7 @@
     (field 'salt       :data-type (make 'byte*    :size 4)))
 
   (define-message-format "AuthenticationCleartextPassword" 'backend
-    (field 'identifier :data-type (make 'byte*    :size 1 :exact-value (char-code #\R)))
+    (field 'identifier :data-type (make 'byte*    :size 1  :exact-value (char-code #\R)))
     (field 'length     :data-type (make 'integer* :bits 32 :exact-value 8))
     (field nil         :data-type (make 'integer* :bits 32 :exact-value 3))))
 
@@ -171,13 +185,9 @@
 ;;; Send message
 
 (defmacro make-send-functions ()
-  (labels ((fixed-field-p (field-format)
-             (slot-boundp (data-type field-format) 'exact-value))
-           (derived-field-p (field-format)
-             (slot-boundp field-format 'derivation))
-           (make-send-function (message-format)
+  (labels ((make-send-function (message-format)
              (let* ((function-symbol
-                     (read-from-string (concatenate 'string "send-" (format-name message-format))))
+                     (intern* (concatenate 'string "send-" (format-name message-format))))
                     (args (map 'list 'field-name
                                (remove-if (lambda (field-format)
                                             (or (fixed-field-p field-format)
@@ -204,16 +214,51 @@
 
 
 
-;;; Methods to generate forms to read the value from PostgreSQL's stream
+;;; Methods to read the value from PostgreSQL's stream
 
 (eval-when (:compile-toplevel)
 
-  (defgeneric form-to-read-in-pg-format (message-data-type value-or-symbol)
-    (:documentation "Generate a form to read value from *standard-output*
-                     according to the format specified by message-data-type."))
+  (defgeneric read-in-pg-format (message-data-type)
+    (:documentation "Read value from *standard-input* according to
+                     the format specified by message-data-type."))
 
-  (defmethod form-to-read-in-pg-format ((message-data-type integer*) value-or-symbol)
-    ))
+  (defmethod read-in-pg-format ((message-data-type integer*))
+    (loop :with bits-per-byte = 8      ; for the #'write-byte
+       :for shift-count :downfrom (- (bits message-data-type) bits-per-byte) :to 0 :by bits-per-byte
+       :summing (ash (read-byte *standard-input*) shift-count)))
+
+  (defmethod read-in-pg-format ((message-data-type byte*))
+    123)) ; FIXME problem with size-field-name...
+
+
+
+;;; Classes of received messages
+
+(defclass message () ())
+
+(eval-when (:compile-toplevel)
+  (defun generate-class-name-from-message-format (message-format)
+    (intern* (concatenate 'string (format-name message-format) "-message"))))
+
+(defmacro generate-classes-from-message-formats ()
+  (flet ((generate-class-from-message-format (message-format)
+           (let ((slots
+                  (map 'list (lambda (field-format)
+                               (with-slots (field-name data-type derivation) field-format
+                                 `(,field-name :initarg ,(intern* field-name :keyword) :reader ,field-name)))
+                       (remove-if (lambda (field-format)
+                                    (or (fixed-field-p field-format)
+                                        (derived-field-p field-format)
+                                        (null (field-name field-format))))
+                                        ; FIXME Maybe derived fields like msg length should be in the class?
+                                  (fields message-format)))))
+             `(defclass ,(generate-class-name-from-message-format message-format) (message) ,slots))))
+    `(progn ,@(mapcar #'generate-class-from-message-format
+                      (filter (lambda (message-format)
+                                (eq 'backend (source message-format)))
+                              *message-formats*)))))
+
+(generate-classes-from-message-formats)
 
 
 
@@ -224,25 +269,43 @@
          (candidates (filter (lambda (message-format)
                                (and (eq 'backend (source message-format))
                                     (eql first-byte (identifying-byte message-format))))
-                             *message-formats*)))
+                             *message-formats*))
+         (field-index 1))                ; skipping the field with the identifying byte
+    (unless candidates (error "No candidates for message format - check message format definitions."))
     (loop :until (exactly-one-element-p candidates)
-       :with field-index = 1 ; skipping the field with the identifying byte
-       :and next-data-type = nil  ;
+       :with next-data-type = nil        ;
+       :and read-value = nil             ; the value that was read from the stream
        :do (flet ((ensure-next-fields-have-same-type ()
                     (let* ((next-fields
                             (mapcar (lambda (message-format)
                                       (aref (fields message-format) field-index))
                                     candidates))
-                           (next-data-types (mapcar #'data-type next-fields))
-                           (next-types (mapcar #'type-information next-fields)))
-                      (unless (lists-equal next-types)
+                           (next-data-types (mapcar #'data-type next-fields)))
+                      (unless (lists-equal (mapcar #'type-information next-data-types))
                         (error "Ambiguous message formats - check message format definitions."))
+                      (unless (slot-boundp (first next-data-types) 'exact-value)
+                        (error "Expected to determine message format by elimination based on a fixed value"))
                       (setf next-data-type (first next-data-types))))
                   (read-value-of-next-field-from-stream ()
-                    )
+                    (setf read-value (read-in-pg-format next-data-type)))
                   (filter-candidates-using-read-value ()
-                    ))
+                    (setf candidates (remove-if (lambda (message-format)
+                                                  (not (eql (exact-value (data-type (aref (fields message-format) field-index))) read-value)))
+                                                candidates))))
              (ensure-next-fields-have-same-type)
              (read-value-of-next-field-from-stream)
              (filter-candidates-using-read-value)
-             (incf field-index)))))
+             (incf field-index))
+       :if (null candidates)
+       :do (error "No candidates for message format - check message format definitions."))
+    (let* ((candidate-message-format (car candidates))
+           (message-class (generate-class-name-from-message-format candidate-message-format))
+           (initargs (loop :for i :from field-index :below (length (fields candidate-message-format))
+                        :appending (let* ((current-field-format (aref (fields candidate-message-format) i)))
+                                     (if (not (or (derived-field-p current-field-format)
+                                                  (fixed-field-p current-field-format)))
+                                         (let* ((initarg (intern* (field-name current-field-format) :keyword))
+                                                (value (read-in-pg-format (data-type current-field-format))))
+                                           (list initarg value)))))))
+      (print `(make (quote ,message-class) ,@initargs))
+      (eval `(make (quote ,message-class) ,@initargs)))))
