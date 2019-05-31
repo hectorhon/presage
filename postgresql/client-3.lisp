@@ -43,8 +43,8 @@
     ((exact-value :type string :initarg :exact-value :reader exact-value)))
 
   (defclass byte* (message-data-type)
-    ((size            :type integer           :initarg :size)
-     (size-field-name :type symbol            :initarg :size-field-name)
+    ((size            :type integer           :initarg :size            :reader size)
+     (size-field-name :type symbol            :initarg :size-field-name :reader size-field-name)
      (exact-value     :type (unsigned-byte 8) :initarg :exact-value     :reader exact-value))))
 
 ;;;
@@ -56,7 +56,8 @@
   (defgeneric type-information (message-data-type)
     (:documentation "Extract type information that can be used to compare whether two
                      fields are of the same type. This is needed because exact-value is
-                     inside the message-data-type...")
+                     inside the message-data-type, which should not be used for the
+                     comparison.")
     (:method-combination append))       ; technically, can use list method
                                         ; combination. append preserves semantics
 
@@ -107,12 +108,7 @@
      (source      :type symbol                :initarg :source      :reader source) ; 'backend or 'frontend
      (fields      :type (vector field-format) :initarg :fields      :reader fields)))
 
-  (defparameter *message-formats* ())
-
-  (defun identifying-byte (message-format)
-    (flet ((identifier-p (field-format)
-             (eq 'identifier (field-name field-format))))
-      (exact-value (data-type (find-if #'identifier-p (fields message-format)))))))
+  (defparameter *message-formats* ()))
 
 (defmacro define-message-format (format-name source &rest field-formats)
   `(let ((message-format
@@ -162,8 +158,8 @@
     (:documentation "Generate a form to write value to *standard-output* according to
                      the format specified by message-data-type."))
 
-  ;; (defmethod form-to-write-in-pg-format ((message-data-type message-data-type) value-or-symbol)
-  ;;   `(format t "form-to-write-in-pg-format not yet implemented~%"))
+  (defmethod form-to-write-in-pg-format ((message-data-type message-data-type) value-or-symbol)
+    (error "form-to-write-in-pg-format for ~a is not implemented." (type-of message-data-type)))
 
   (defmethod form-to-write-in-pg-format ((message-data-type integer*) value-or-symbol)
     `(loop :with bits-per-byte = 8      ; for the #'write-byte
@@ -185,18 +181,17 @@
   (labels ((make-send-function (message-format)
              (let* ((function-symbol
                      (intern (string-upcase (concatenate 'string "send-" (format-name message-format)))))
-                    (args (map 'list 'field-name
+                    (args (map 'list #'field-name
                                (remove-if (lambda (field-format)
                                             (or (fixed-field-p field-format)
                                                 (derived-field-p field-format)))
                                           (slot-value message-format 'fields))))
                     (body (map 'list (lambda (field-format)
-                                       ;; `(format t "write a ~a~%" ,(format nil "~a" (type-of (data-type field-format)))))
                                        (cond ((fixed-field-p field-format)
                                               (form-to-write-in-pg-format (data-type field-format)
                                                                           (exact-value (data-type field-format))))
                                              ((derived-field-p field-format)
-                                              `(print "derived field not yet implemented"))
+                                              `(print "Derived field not implemented."))
                                              (t
                                               (form-to-write-in-pg-format (data-type field-format)
                                                                           (field-name field-format)))))
@@ -220,17 +215,42 @@
     (:documentation "Generate the form to read value from *standard-input* according to
                      the format specified by message-data-type."))
 
+  (defmethod form-to-read-in-pg-format (message-data-type)
+    (error "form-to-read-in-pg-format for ~a not implemented." (type-of message-data-type)))
+
   (defmethod form-to-read-in-pg-format ((message-data-type integer*))
     `(loop :with bits-per-byte = 8       ; for the #'write-byte
         :for shift-count :downfrom (- ,(bits message-data-type) bits-per-byte) :to 0 :by bits-per-byte
         :summing (ash (read-byte *standard-input*) shift-count)))
 
   (defmethod form-to-read-in-pg-format ((message-data-type byte*))
-    123))                               ; FIXME problem with size-field-name...
+    (if (slot-boundp message-data-type 'size-field-name)
+        (error "Not yet implemented."))
+    `(loop :with arr = (make-array ,(size message-data-type))
+        :for i :from 0 :below ,(size message-data-type)
+        :do (setf (aref arr i) (read-byte *standard-input*))
+        :finally (if (eql 1 (length arr))
+                     (return (aref arr 0))
+                     (return arr)))))
 
 ;;;
 ;;; Classes of received messages
 ;;;
+
+(eval-when (:compile-toplevel)
+
+  (defgeneric cl-type (message-data-type)
+    (:documentation "Which CL type does this message-data-type map to?"))
+
+  (defmethod cl-type ((message-data-type integer*)) 'integer)
+
+  (defmethod cl-type ((message-data-type integer-array*)) '(vector integer))
+
+  (defmethod cl-type ((message-data-type string*)) 'string)
+
+  (defmethod cl-type ((message-data-type byte*))
+    ;; byte1 will be stored as single byte, byteN will be stored as vector
+    t))
 
 (defclass message () ())
 
@@ -244,7 +264,8 @@
                   (map 'list (lambda (field-format)
                                (with-slots (field-name data-type derivation) field-format
                                  `(,field-name :initarg ,(intern (string-upcase field-name) :keyword)
-                                               :reader ,field-name)))
+                                               :reader ,field-name
+                                               :type ,(cl-type (data-type field-format)))))
                        (remove-if (lambda (field-format)
                                     (or (fixed-field-p field-format)
                                         (derived-field-p field-format)
@@ -265,99 +286,54 @@
 
 (defmacro make-parse-function ()
   (let ((field-index 0))
-    `(let ((values nil))
-       ,(labels ((make-parse-form (candidate-message-formats)
-                   (cond ((endp candidate-message-formats)
-                          (error "No more candidates - check message format definitions."))
-                         ((endp (cdr candidate-message-formats))
-                          ;; only one candidate left, generate form to read remaining fields
-                          (let* ((candidate (car candidate-message-formats))
-                                 (remaining-fields (subseq (fields candidate) field-index)))
-                            `(progn ,@(loop :for field :across remaining-fields
-                                         :if (field-name field)
-                                         :collecting `(acons (quote ,(field-name field))
-                                                             ,(form-to-read-in-pg-format (data-type field))
-                                                             values)))))
-                         (t
-                          (flet ((current-field (message-format)
-                                   (aref (fields message-format) field-index)))
-                            ;; ensure next fields have same type and have fixed value specifications
-                            (loop :for message-format :in candidate-message-formats
-                               :unless (or (eq (type-information (data-type (current-field (car candidate-message-formats))))
-                                               (type-information (data-type (current-field message-format))))
-                                           (fixed-field-p (current-field message-format)))
-                               :do (error "Expected candidates to have same message-data-types -
-                                  check message format definitions."))
-                            ;; sort and group candidates by fixed values
-                            (let ((candidates-grouped-by-fixed-values
-                                   (loop :for message-format :in candidate-message-formats
-                                      :with hashmap = (make-hash-table :test 'eq)
-                                      :do (push message-format
-                                                (gethash (exact-value (data-type (current-field message-format))) hashmap))
-                                      :finally (return hashmap))))
-                              `(let ((value ,(form-to-read-in-pg-format (data-type (current-field (car candidate-message-formats))))))
-                                 ,(progn (incf field-index)
-                                         `(cond ,@(loop :for fixed-value :being :the :hash-key :of candidates-grouped-by-fixed-values
-                                                     :using (:hash-value candidates)
-                                                     :collecting `((eql ,fixed-value value) ,(make-parse-form candidates))))))))))))
-          ;;  (sort-and-group-candidates-by-fixed-values)
-          ;;  `(read-next-field-value-from-stream)
-          ;;  `(cond ,(for-each group
-          ;;                    `((eql ,fixed-value-of-this-group)
-          ;;                      ,(xxx (1+ field-index))))))
-          ;; `(read-remaining-fields))))
-          (let ((candidate-message-formats (remove-if (lambda (message-format)
-                                                        (not (eq 'backend (source message-format))))
-                                                      *message-formats*)))
-            (make-parse-form candidate-message-formats))))))
+    (labels ((make-parse-forms (candidate-message-formats)
+               (cond ((endp candidate-message-formats)
+                      (error "No more candidates - check message format definitions."))
+                     ((endp (cdr candidate-message-formats))
+                      ;; only one candidate left, generate forms to read remaining fields
+                      (let* ((candidate (car candidate-message-formats))
+                             (remaining-fields (subseq (fields candidate) field-index)))
+                        `(,@(loop :for field :across remaining-fields
+                               :collecting `(let ((value ,(form-to-read-in-pg-format (data-type field))))
+                                              ;; let clause is needed for the side effect (read from stream)
+                                              ,(if (field-name field)
+                                                   `(setf values (acons (quote ,(field-name field)) value values))
+                                                   `(declare (ignore value)))))
+                            (let ((message (make-instance (quote ,(class-name-from-message-format candidate)))))
+                              (loop :for pair :in values :do (setf (slot-value message (car pair)) (cdr pair))
+                                 :finally (return message))))))
+                     (t
+                      (flet ((current-field (message-format)
+                               (aref (fields message-format) field-index)))
+                        ;; ensure next fields have same type and have fixed value specifications
+                        (loop :for message-format :in candidate-message-formats
+                           :unless (or (eq (type-information (data-type (current-field (car candidate-message-formats))))
+                                           (type-information (data-type (current-field message-format))))
+                                       (fixed-field-p (current-field message-format)))
+                           :do (error "Expected candidates to have same message-data-types - check message format definitions."))
+                        ;; sort and group candidates by fixed values
+                        (let ((candidates-grouped-by-fixed-values
+                               (loop :for message-format :in candidate-message-formats
+                                  :with hashmap = (make-hash-table :test 'eq)
+                                  :do (push message-format
+                                            (gethash (exact-value (data-type (current-field message-format))) hashmap))
+                                  :finally (return hashmap))))
+                          `((let ((value ,(form-to-read-in-pg-format (data-type (current-field (car candidate-message-formats))))))
+                              ,(progn (incf field-index)
+                                      `(cond ,@(loop :for fixed-value :being :the :hash-keys :of candidates-grouped-by-fixed-values
+                                                  :using (:hash-value candidates)
+                                                  :collecting `((eql ,fixed-value value)
+                                                                ,@(make-parse-forms candidates)))
+                                             (t (error "When parsing field number ~D, expected one of ~a, but got ~a instead."
+                                                       ,field-index ; 1-indexed; happens to work because of previous incf
+                                                       (list ,@(loop :for key :being :the :hash-key :of candidates-grouped-by-fixed-values
+                                                                  :collecting key))
+                                                       value))))))))))))
+      (let ((candidate-message-formats (remove-if (lambda (message-format)
+                                                    (not (eq 'backend (source message-format))))
+                                                  *message-formats*)))
+        `(defun parse-message-from-backend ()
+           (let ((values nil))
+             ,@(make-parse-forms candidate-message-formats)))))))
 
 (make-parse-function)
-
-
-
-
-;; (defun parse-message-from-backend (stream)
-;;   (let* ((first-byte (read-byte stream))
-;;          (candidates (remove-if (lambda (message-format)
-;;                                   (or (not (eq 'backend (source message-format)))
-;;                                       (not (eql first-byte (identifying-byte message-format)))))
-;;                                 *message-formats*))
-;;          (field-index 1))               ; skipping the field with the identifying byte
-;;     (unless candidates (error "No candidates for message format - check message format definitions."))
-;;     (loop :until (and (car candidates) (not (cdr candidates)))
-;;        :with next-data-type = nil       ;
-;;        :and read-value = nil            ; the value that was read from the stream
-;;        :do (flet ((ensure-next-fields-have-same-type ()
-;;                     (let* ((next-fields (mapcar (lambda (message-format)
-;;                                                   (aref (fields message-format) field-index))
-;;                                                 candidates))
-;;                            (next-data-types (mapcar #'data-type next-fields)))
-;;                       (unless (lists-equal-p (mapcar #'type-information next-data-types))
-;;                         (error "Ambiguous message formats - check message format definitions."))
-;;                       (unless (slot-boundp (first next-data-types) 'exact-value)
-;;                         (error "Expected to determine message format by elimination based on a fixed value"))
-;;                       (setf next-data-type (first next-data-types))))
-;;                   (read-value-of-next-field-from-stream ()
-;;                     (setf read-value (read-in-pg-format next-data-type)))
-;;                   (filter-candidates-using-read-value ()
-;;                     (setf candidates (remove-if (lambda (message-format)
-;;                                                   (not (eql (exact-value (data-type (aref (fields message-format) field-index)))
-;;                                                             read-value)))
-;;                                                 candidates))))
-;;              (ensure-next-fields-have-same-type)
-;;              (read-value-of-next-field-from-stream)
-;;              (filter-candidates-using-read-value)
-;;              (incf field-index))
-;;        :if (null candidates)
-;;        :do (error "No more candidates for message format - check message format definitions."))
-;;     (let* ((candidate-message-format (car candidates))
-;;            (message-class (generate-class-name-from-message-format candidate-message-format))
-;;            (initargs (loop :for i :from field-index :below (length (fields candidate-message-format))
-;;                         :appending (let* ((current-field-format (aref (fields candidate-message-format) i)))
-;;                                      (if (not (or (derived-field-p current-field-format)
-;;                                                   (fixed-field-p current-field-format)))
-;;                                          (let* ((initarg (intern (string-upcase (field-name current-field-format)) :keyword))
-;;                                                 (value (read-in-pg-format (data-type current-field-format))))
-;;                                            (list initarg value)))))))
-;;       (print `(make (quote ,message-class) ,@initargs))
-;;       (eval `(make (quote ,message-class) ,@initargs)))))
