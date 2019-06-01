@@ -45,7 +45,11 @@
   (defclass bytes* (message-data-type)
     ((size            :type integer           :initarg :size            :reader size)
      (size-field-name :type symbol            :initarg :size-field-name :reader size-field-name)
-     (exact-value     :type (unsigned-byte 8) :initarg :exact-value     :reader exact-value))))
+     (exact-value     :type (unsigned-byte 8) :initarg :exact-value     :reader exact-value)))
+
+  (defclass repeated (message-data-type)
+    ((times-field-name  :type symbol                :initarg :times-field-name  :reader times-field-name)
+     (fields            :type (vector field-format) :initarg :fields            :reader fields))))
 
 ;;;
 ;;; Methods to extract type information from message-data-type
@@ -171,13 +175,14 @@
       (field 'parameter-format-codes
         :data-type (make 'integer-array* :bits 16 :array-length-field-name 'number-of-parameter-format-codes))
 
-      ;; TODO
-      ;; (field 'number-of-parameter-values
-      ;;   :data-type (make 'integer* :bits 16)
-      ;;  :derivation '(field-count xxx))
-      ;; (repeatedly :times 'number-of-parameter-values
-      ;;             (field 'length-of-parameter-value :data-type (make 'integer* :bits 16))
-      ;;             (field 'parameter-value           :data-type (make 'bytes*   :size-field-name 'length-of-parameter-value)))
+      (field 'number-of-parameter-values
+        :data-type (make 'integer* :bits 16)
+        :derivation '(field-count parameter-values))
+      (field 'parameter-values
+        :data-type (make 'repeated :times-field-name 'number-of-parameter-values
+                         :fields (vector (field 'length-of-parameter-value :data-type (make 'integer* :bits 16))
+                                         (field 'parameter-value
+                                           :data-type (make 'bytes* :size-field-name 'length-of-parameter-value)))))
 
       (field 'number-of-result-column-format-codes
         :data-type (make 'integer* :bits 16)
@@ -191,21 +196,41 @@
 ;;;
 
 (eval-when (:compile-toplevel)
+
+  (defun form-to-derive-field-length (field-format)
+    (let ((bits-per-byte 8))
+      (ecase (type-of (data-type field-format))
+        (integer*
+         `(/ ,(bits (data-type field-format)) ,bits-per-byte))
+        (integer-array*
+         `(* (length ,(field-name field-format))
+             (/ ,(bits (data-type field-format)) ,bits-per-byte)))
+        (string*
+         `(1+ (length ,(field-name field-format))))
+        (bytes*
+         (cond ((slot-boundp (data-type field-format) 'size)
+                `(* ,(size (data-type field-format))))
+               ((slot-boundp (data-type field-format) 'size-field-name)
+                (size-field-name (data-type field-format)))
+               (t (error "Either :size or :size-field-name must be specified: ~a" field-format))))
+        (repeated
+         (let* ((repeated-message-data-type (data-type field-format))
+                (inner-field-formats (fields repeated-message-data-type))
+                (inner-field-names (map 'vector #'field-name inner-field-formats)))
+           `(* (length ,(field-name field-format))
+               (loop :for item :across ,(field-name field-format)
+                  :summing (let ,(loop :for inner-field-name :across inner-field-names
+                                    :for field-index :upfrom 0
+                                    :collecting `(,inner-field-name (aref item ,field-index)))
+                             (declare (ignorable ,@(coerce inner-field-names 'list)))
+                             (+ ,@(loop :for field-format :across inner-field-formats
+                                     :collecting (form-to-derive-field-length field-format)))))))))))
+
   (defun form-to-derive-field (field-format message-format)
-    (let ((derivation (derivation field-format))
-          (bits-per-byte 8))
+    (let ((derivation (derivation field-format)))
       (cond ((eq 'message-length derivation)
              `(+ ,@(loop :for field-format :across (fields message-format)
-                      :collecting (ecase (type-of (data-type field-format))
-                                    (integer*
-                                     `(/ ,(bits (data-type field-format)) ,bits-per-byte))
-                                    (integer-array*
-                                     `(* (length ,(field-name field-format))
-                                         (/ ,(bits (data-type field-format)) ,bits-per-byte)))
-                                    (string*
-                                     `(1+ (length ,(field-name field-format))))
-                                    (bytes*
-                                     `(* ,(size (data-type field-format))))))))
+                      :collecting (form-to-derive-field-length field-format))))
             ((eq 'field-count (car derivation))
              (let ((target-field-name (cadr derivation)))
                `(length ,target-field-name)))
@@ -239,7 +264,17 @@
             (write-byte 0 *standard-output*)))
 
   (defmethod form-to-write-in-pg-format ((message-data-type bytes*) value-form)
-    `(write-byte ,value-form *standard-output*)))
+    (if (and (slot-boundp message-data-type 'size)
+             (eql 1 (size message-data-type)))
+        `(write-byte ,value-form *standard-output*)
+        `(loop :for byt :across ,value-form
+            :do (write-byte byt *standard-output*))))
+
+  (defmethod form-to-write-in-pg-format ((message-data-type repeated) value-form)
+    (let* ((inner-field-formats (fields message-data-type)))
+      `(loop :for item :across ,value-form
+          :do (progn ,@(loop :for inner-field-format :across inner-field-formats
+                          :collecting (form-to-write-in-pg-format (data-type inner-field-format) 'item)))))))
 
 ;;;
 ;;; Send message
@@ -406,11 +441,15 @@
 
 
 ;; Test parse
-;; (with-open-file (*standard-input* "test.bin" :element-type :default)
-;;   (parse-message-from-backend))
+(#|
+ (with-open-file (*standard-input* "auth-md5-message.bin" :element-type :default)
+ (parse-message-from-backend))
+ |#)
 
 ;; Test send
-;; (with-open-file (*standard-output* "bind.bin" :direction :output :element-type :default
-;;                                    :if-exists :supersede
-;;                                    :if-does-not-exist :create)
-;;   (send-bind "dpn" "spsn" (vector) (vector)))
+(#|
+ (with-open-file (*standard-output* "bind.bin" :direction :output :element-type :default
+ :if-exists :supersede
+ :if-does-not-exist :create)
+ (send-bind "dpn" "spsn" (vector) (vector)))
+ |#)
