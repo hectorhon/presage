@@ -36,13 +36,13 @@
      (exact-value :type integer :initarg :exact-value :reader exact-value)))
 
   (defclass integer-array* (message-data-type)
-    ((bits                    :type integer :initarg :bits)
-     (array-length-field-name :type symbol  :initarg :array-length-field-name)))
+    ((bits                    :type integer :initarg :bits                    :reader bits)
+     (array-length-field-name :type symbol  :initarg :array-length-field-name :reader array-length-field-name)))
 
   (defclass string* (message-data-type)
     ((exact-value :type string :initarg :exact-value :reader exact-value)))
 
-  (defclass byte* (message-data-type)
+  (defclass bytes* (message-data-type)
     ((size            :type integer           :initarg :size            :reader size)
      (size-field-name :type symbol            :initarg :size-field-name :reader size-field-name)
      (exact-value     :type (unsigned-byte 8) :initarg :exact-value     :reader exact-value))))
@@ -80,7 +80,7 @@
   (defmethod type-information append ((message-data-type string*))
              (list (gensym)))           ; always unique, since the length isn't known
 
-  (defmethod type-information append ((message-data-type byte*))
+  (defmethod type-information append ((message-data-type bytes*))
              ;; (list (size message-data-type))))
              (list (gensym))))          ; not implemented
 
@@ -97,7 +97,8 @@
 
   (defun fixed-field-p (field-format)
     (declare (field-format field-format))
-    (slot-boundp (data-type field-format) 'exact-value))
+    (and (slot-exists-p (data-type field-format) 'exact-value)
+         (slot-boundp (data-type field-format) 'exact-value)))
 
   (defun derived-field-p (field-format)
     (declare (field-format field-format))
@@ -135,18 +136,47 @@
       (field 'user     :data-type (make 'string*))
       (field nil       :data-type (make 'string* :exact-value "database"))
       (field 'database :data-type (make 'string*))
-      (field nil       :data-type (make 'byte* :size 1 :exact-value 0)))
+      (field nil       :data-type (make 'bytes* :size 1 :exact-value 0)))
+
+    (define-message-format "AuthenticationOk" 'backend
+      (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\R)))
+      (field 'length     :data-type (make 'integer* :bits 32 :exact-value 8))
+      (field nil         :data-type (make 'integer* :bits 32 :exact-value 0)))
 
     (define-message-format "AuthenticationMD5Password" 'backend
-      (field 'identifier :data-type (make 'byte*    :size 1  :exact-value (char-code #\R)))
+      (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\R)))
       (field 'length     :data-type (make 'integer* :bits 32 :exact-value 12))
       (field nil         :data-type (make 'integer* :bits 32 :exact-value 5))
-      (field 'salt       :data-type (make 'byte*    :size 4)))
+      (field 'salt       :data-type (make 'bytes*   :size 4)))
 
     (define-message-format "AuthenticationCleartextPassword" 'backend
-      (field 'identifier :data-type (make 'byte*    :size 1  :exact-value (char-code #\R)))
+      (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\R)))
       (field 'length     :data-type (make 'integer* :bits 32 :exact-value 8))
-      (field nil         :data-type (make 'integer* :bits 32 :exact-value 3)))))
+      (field nil         :data-type (make 'integer* :bits 32 :exact-value 3)))
+
+    (define-message-format "BackendKeyData" 'backend
+      (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\K)))
+      (field 'length     :data-type (make 'integer* :bits 32 :exact-value 12))
+      (field 'process-id :data-type (make 'integer* :bits 32))
+      (field 'secret-key :data-type (make 'integer* :bits 32)))
+
+    (define-message-format "Bind" 'frontend
+      (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\K)))
+      (field 'length     :data-type (make 'integer* :bits 32))
+      (field 'destination-portal-name        :data-type (make 'string*))
+      (field 'source-prepared-statement-name :data-type (make 'string*))
+      (field 'number-of-parameter-format-codes :data-type (make 'integer* :bits 16))
+      (field 'parameter-format-codes
+        :data-type (make 'integer-array* :bits 16
+                         :array-length-field-name 'number-of-parameter-format-codes))
+      (field 'number-of-parameter-values :data-type (make 'integer* :bits 16))
+      ;; (repeatedly :times 'number-of-parameter-values
+      ;;             (field 'length-of-parameter-value :data-type (make 'integer* :bits 16))
+      ;;             (field 'parameter-value           :data-type (make 'bytes*   :size-field-name 'length-of-parameter-value)))
+      (field 'number-of-result-column-format-codes :data-type (make 'integer* :bits 16))
+      (field 'result-column-format-codes
+        :data-type (make 'integer-array* :bits 16
+                         :array-length-field-name 'number-of-result-column-format-codes)))))
 
 ;;;
 ;;; Methods to generate forms to write the value to PostgreSQL's stream
@@ -158,19 +188,20 @@
     (:documentation "Generate a form to write value to *standard-output* according to
                      the format specified by message-data-type."))
 
-  (defmethod form-to-write-in-pg-format ((message-data-type message-data-type) value-or-symbol)
-    (error "form-to-write-in-pg-format for ~a is not implemented." (type-of message-data-type)))
-
   (defmethod form-to-write-in-pg-format ((message-data-type integer*) value-or-symbol)
     `(loop :with bits-per-byte = 8      ; for the #'write-byte
         :for pos :downfrom (- ,(bits message-data-type) bits-per-byte) :to 0 :by bits-per-byte
         :do (write-byte (ldb (byte 8 pos) ,value-or-symbol) *standard-output*)))
 
+  (defmethod form-to-write-in-pg-format ((message-data-type integer-array*) value-or-symbol)
+    `(loop :for integer :across ,value-or-symbol
+        :do ,(form-to-write-in-pg-format (make-instance 'integer* :bits (bits message-data-type)) 'integer)))
+
   (defmethod form-to-write-in-pg-format ((message-data-type string*) value-or-symbol)
     `(progn (write-string ,value-or-symbol *standard-output*)
             (write-byte 0 *standard-output*)))
 
-  (defmethod form-to-write-in-pg-format ((message-data-type byte*) value-or-symbol)
+  (defmethod form-to-write-in-pg-format ((message-data-type bytes*) value-or-symbol)
     `(write-byte ,value-or-symbol *standard-output*)))
 
 ;;;
@@ -223,7 +254,7 @@
         :for shift-count :downfrom (- ,(bits message-data-type) bits-per-byte) :to 0 :by bits-per-byte
         :summing (ash (read-byte *standard-input*) shift-count)))
 
-  (defmethod form-to-read-in-pg-format ((message-data-type byte*))
+  (defmethod form-to-read-in-pg-format ((message-data-type bytes*))
     (if (slot-boundp message-data-type 'size-field-name)
         (error "Not yet implemented."))
     `(loop :with arr = (make-array ,(size message-data-type))
@@ -248,7 +279,7 @@
 
   (defmethod cl-type ((message-data-type string*)) 'string)
 
-  (defmethod cl-type ((message-data-type byte*))
+  (defmethod cl-type ((message-data-type bytes*))
     ;; byte1 will be stored as single byte, byteN will be stored as vector
     t))
 
