@@ -18,9 +18,8 @@
     ((exact-value :type string :initarg :exact-value :reader exact-value)))
 
   (defclass bytes* (message-data-type)
-    ((size            :type integer           :initarg :size            :reader size)
-     (size-field-name :type symbol            :initarg :size-field-name :reader size-field-name)
-     (exact-value     :type (unsigned-byte 8) :initarg :exact-value     :reader exact-value)))
+    ((size        :type (or integer symbol) :initarg :size        :reader size) ; if symbol, it refers to a field-name
+     (exact-value :type (unsigned-byte 8)   :initarg :exact-value :reader exact-value)))
 
   (defclass repeated (message-data-type)
     ((times-field-name  :type symbol                :initarg :times-field-name  :reader times-field-name)
@@ -160,7 +159,7 @@
                                                      :data-type (make 'integer* :bits 16)
                                                      :derivation '(field-length parameter-value))
                                               (field 'parameter-value
-                                                     :data-type (make 'bytes* :size-field-name 'length-of-parameter-value)))))
+                                                     :data-type (make 'bytes* :size 'length-of-parameter-value)))))
       (field 'number-of-result-column-format-codes
              :data-type (make 'integer* :bits 16)
              :derivation `(field-count result-column-format-codes))
@@ -206,7 +205,7 @@
                                                      :data-type (make 'integer* :bits 32)
                                                      :derivation '(field-length column-value))
                                               (field 'column-value
-                                                     :data-type (make 'bytes* :size-field-name 'length-of-column-value))))))
+                                                     :data-type (make 'bytes* :size 'length-of-column-value))))))
 
     ))
 
@@ -228,12 +227,7 @@
         (string*
          `(1+ (length ,(field-name field-format))))
         (bytes*
-         (cond ((slot-boundp (data-type field-format) 'size)
-                `(* ,(size (data-type field-format))))
-               ((slot-boundp (data-type field-format) 'size-field-name)
-                (size-field-name (data-type field-format)))
-               (t (error "Either :size or :size-field-name must be specified: ~a"
-                         (field-name field-format)))))
+         (size (data-type field-format)))
         (repeated
          (let* ((repeated-message-data-type (data-type field-format))
                 (inner-field-formats (fields repeated-message-data-type))
@@ -377,12 +371,10 @@
              'string))
 
   (defmethod form-to-read-in-pg-format ((message-data-type bytes*))
-    `(loop :with size = ,(cond ((slot-boundp message-data-type 'size)
-                                (size message-data-type))
-                               ((slot-boundp message-data-type 'size-field-name)
-                                `(cdr (assoc (quote ,(size-field-name message-data-type)) values)))
-                               (t
-                                (error "Either :size or :size-field-name must be specified")))
+    `(loop :with size = ,(with-slots (size) message-data-type
+                           (if (symbolp size)
+                               `(cdr (assoc (quote ,size) values))
+                               size))
         :with arr = (make-array size)
         :for i :from 0 :below size
         :do (setf (aref arr i) (read-byte *standard-input*))
