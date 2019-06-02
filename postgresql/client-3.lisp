@@ -107,6 +107,9 @@
              (field (field-name &body body)
                `(make-instance 'field-format :field-name ,field-name ,@body)))
 
+    ;; Fields named 'identifier are not counted towards the message length, see the
+    ;; given lengths in the spec.
+
     (define-message-format "StartupMessage" 'frontend
       (field 'length   :data-type (make 'integer* :bits 32) :derivation 'message-length)
       (field 'protocol-version-number :data-type (make 'integer* :bits 32 :exact-value 196608))
@@ -153,14 +156,59 @@
              :derivation '(field-count parameter-values))
       (field 'parameter-values
              :data-type (make 'repeated :times-field-name 'number-of-parameter-values
-                              :fields (vector (field 'length-of-parameter-value :data-type (make 'integer* :bits 16))
+                              :fields (vector (field 'length-of-parameter-value
+                                                     :data-type (make 'integer* :bits 16)
+                                                     :derivation '(field-length parameter-value))
                                               (field 'parameter-value
                                                      :data-type (make 'bytes* :size-field-name 'length-of-parameter-value)))))
       (field 'number-of-result-column-format-codes
              :data-type (make 'integer* :bits 16)
              :derivation `(field-count result-column-format-codes))
       (field 'result-column-format-codes
-             :data-type (make 'integer-array* :bits 16 :array-length-field-name 'number-of-result-column-format-codes)))))
+             :data-type (make 'integer-array* :bits 16 :array-length-field-name 'number-of-result-column-format-codes)))
+
+    (define-message-format "BindComplete" 'backend
+      (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\2)))
+      (field 'length     :data-type (make 'integer* :bits 32 :exact-value 4)))
+
+    (define-message-format "CancelRequest" 'frontend
+      (field 'length              :data-type (make 'integer* :bits 32 :exact-value 16))
+      (field 'cancel-request-code :data-type (make 'integer* :bits 32 :exact-value 80877102))
+      (field 'process-id          :data-type (make 'integer* :bits 32))
+      (field 'secret-key          :data-type (make 'integer* :bits 32)))
+
+    (define-message-format "Close" 'frontend
+      (field 'identifier :data-type (make 'bytes*   :size 1 :exact-value (char-code #\C)))
+      (field 'length     :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'close-what :data-type (make 'bytes*   :size 1)) ; #\S to close a prepared statement, #\P to close a portal
+      (field 'statement-or-portal-name :data-type (make 'string*)))
+
+    (define-message-format "CloseComplete" 'backend
+      (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\3)))
+      (field 'length     :data-type (make 'integer* :bits 32 :exact-value 4)))
+
+    (define-message-format "CommandComplete" 'backend
+      (field 'identifier  :data-type (make 'bytes*   :size 1  :exact-value (char-code #\C)))
+      (field 'length      :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'command-tag :data-type (make 'string*)))
+
+    ;; copy not yet implemented
+
+    (define-message-format "DataRow" 'backend
+      (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\D)))
+      (field 'length     :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'number-of-column-values
+             :data-type (make 'integer* :bits 16)
+             :derivation '(field-count column-values))
+      (field 'column-values
+             :data-type (make 'repeated :times-field-name 'number-of-column-values
+                              :fields (vector (field 'length-of-column-value
+                                                     :data-type (make 'integer* :bits 32)
+                                                     :derivation '(field-length column-value))
+                                              (field 'column-value
+                                                     :data-type (make 'bytes* :size-field-name 'length-of-column-value))))))
+
+    ))
 
 ;;;
 ;;; Field derivation, e.g. message length. It is meaningful only when sending
@@ -184,7 +232,8 @@
                 `(* ,(size (data-type field-format))))
                ((slot-boundp (data-type field-format) 'size-field-name)
                 (size-field-name (data-type field-format)))
-               (t (error "Either :size or :size-field-name must be specified: ~a" field-format))))
+               (t (error "Either :size or :size-field-name must be specified: ~a"
+                         (field-name field-format)))))
         (repeated
          (let* ((repeated-message-data-type (data-type field-format))
                 (inner-field-formats (fields repeated-message-data-type))
@@ -198,12 +247,24 @@
                              (+ ,@(loop :for field-format :across inner-field-formats
                                      :collecting (form-to-derive-field-length field-format)))))))))))
 
-  (defun form-to-derive-field (field-format message-format)
+  (defun form-to-derive-field (field-format &optional message-format)
+    "Generate a form to derive the value of the field. The argument message-format is
+     required only for message length derivation."
     (let ((derivation (derivation field-format)))
       (cond ((eq 'message-length derivation)
+             (if (null message-format)
+                 (error "The argument message-format cannot be null for message length derivation."))
              `(+ ,@(loop :for field-format :across (fields message-format)
+                      ;; Quote: The first byte of a message identifies the message type,
+                      ;; and the next four bytes specify the length of the rest of the
+                      ;; message (this length count includes itself, but not the
+                      ;; message-type byte).
+                      :unless (eq 'identifier (field-name field-format))
                       :collecting (form-to-derive-field-length field-format))))
             ((eq 'field-count (car derivation))
+             (let ((target-field-name (cadr derivation)))
+               `(length ,target-field-name)))
+            ((eq 'field-length (car derivation))
              (let ((target-field-name (cadr derivation)))
                `(length ,target-field-name)))
             (t
@@ -220,9 +281,12 @@
                      *standard-output* according to the format specified by
                      message-data-type."))
 
+  ;; The arguments could have been field-format instead of message-data-type, but then
+  ;; defmethod specialization won't work.
+
   (defmethod form-to-write-in-pg-format ((message-data-type integer*) value-form)
     (let ((sym (gensym)))
-      `(loop :with bits-per-byte = 8      ; for the #'write-byte
+      `(loop :with bits-per-byte = 8    ; for the #'write-byte
           :with ,sym = ,value-form
           :for pos :downfrom (- ,(bits message-data-type) bits-per-byte) :to 0 :by bits-per-byte
           :do (write-byte (ldb (byte bits-per-byte pos) ,sym) *standard-output*))))
@@ -243,10 +307,19 @@
             :do (write-byte byt *standard-output*))))
 
   (defmethod form-to-write-in-pg-format ((message-data-type repeated) value-form)
-    (let* ((inner-field-formats (fields message-data-type)))
+    (let* ((inner-field-formats (fields message-data-type))
+           (inner-field-names (map 'vector #'field-name inner-field-formats)))
       `(loop :for item :across ,value-form
-          :do (progn ,@(loop :for inner-field-format :across inner-field-formats
-                          :collecting (form-to-write-in-pg-format (data-type inner-field-format) 'item)))))))
+          :do (let ,(loop :for inner-field-name :across inner-field-names
+                       :for field-index :upfrom 0
+                       :collecting `(,inner-field-name (aref item ,field-index)))
+                (declare (ignorable ,@(coerce inner-field-names 'list)))
+                ,@(loop :for inner-field-format :across inner-field-formats
+                    :if (derived-field-p inner-field-format)
+                    :collecting (form-to-write-in-pg-format (data-type inner-field-format)
+                                                            (form-to-derive-field inner-field-format))
+                    :else
+                    :collecting (form-to-write-in-pg-format (data-type inner-field-format) 'item)))))))
 
 ;;;
 ;;; Send message
@@ -296,15 +369,31 @@
         :for shift-count :downfrom (- ,(bits message-data-type) bits-per-byte) :to 0 :by bits-per-byte
         :summing (ash (read-byte *standard-input*) shift-count)))
 
+  (defmethod form-to-read-in-pg-format ((message-data-type string*))
+    `(coerce (loop :with last-read-character
+                :collecting (let ((c (read-char)))
+                              (setf last-read-character c))
+                :until (eql #\0 last-read-character))
+             'string))
+
   (defmethod form-to-read-in-pg-format ((message-data-type bytes*))
-    (if (slot-boundp message-data-type 'size-field-name)
-        (error "Not yet implemented."))
-    `(loop :with arr = (make-array ,(size message-data-type))
-        :for i :from 0 :below ,(size message-data-type)
+    `(loop :with size = ,(cond ((slot-boundp message-data-type 'size)
+                                (size message-data-type))
+                               ((slot-boundp message-data-type 'size-field-name)
+                                `(cdr (assoc (quote ,(size-field-name message-data-type)) values)))
+                               (t
+                                (error "Either :size or :size-field-name must be specified")))
+        :with arr = (make-array size)
+        :for i :from 0 :below size
         :do (setf (aref arr i) (read-byte *standard-input*))
         :finally (if (eql 1 (length arr))
                      (return (aref arr 0))
-                     (return arr)))))
+                     (return arr))))
+
+  (defmethod form-to-read-in-pg-format ((message-data-type repeated))
+    `(loop :for i :from 0 :below (cdr (assoc (quote ,(times-field-name message-data-type)) values))
+        :collecting (list ,@(loop :for inner-field-format :across (fields message-data-type)
+                               :collecting (form-to-read-in-pg-format (data-type inner-field-format)))))))
 
 ;;;
 ;;; Classes of received messages
@@ -323,6 +412,10 @@
 
   (defmethod cl-type ((message-data-type bytes*))
     ;; byte1 will be stored as single byte, byteN will be stored as vector
+    t)
+
+  (defmethod cl-type ((message-data-type repeated))
+    ;; Store as a list, don't care about type specifier for now
     t))
 
 (defclass message () ())
@@ -392,7 +485,7 @@
                                           (gethash (exact-value (data-type (current-field message-format))) hashmap))
                                 :finally (return hashmap))))
                         `((let ((value ,(form-to-read-in-pg-format (data-type (current-field (car candidate-message-formats))))))
-                            (cond ,@(loop :for fixed-value :being :the :hash-keys :of candidates-grouped-by-fixed-values
+                            (cond ,@(loop :for fixed-value :being :the :hash-key :of candidates-grouped-by-fixed-values
                                        :using (:hash-value candidates)
                                        :collecting `((eql ,fixed-value value)
                                                      ,@(make-parse-forms candidates (1+ field-index))))
