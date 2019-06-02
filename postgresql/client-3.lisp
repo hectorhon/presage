@@ -143,27 +143,24 @@
       (field 'length     :data-type (make 'integer* :bits 32) :derivation 'message-length)
       (field 'destination-portal-name        :data-type (make 'string*))
       (field 'source-prepared-statement-name :data-type (make 'string*))
-
       (field 'number-of-parameter-format-codes
-        :data-type (make 'integer* :bits 16)
-        :derivation '(field-count parameter-format-codes))
+             :data-type (make 'integer* :bits 16)
+             :derivation '(field-count parameter-format-codes))
       (field 'parameter-format-codes
-        :data-type (make 'integer-array* :bits 16 :array-length-field-name 'number-of-parameter-format-codes))
-
+             :data-type (make 'integer-array* :bits 16 :array-length-field-name 'number-of-parameter-format-codes))
       (field 'number-of-parameter-values
-        :data-type (make 'integer* :bits 16)
-        :derivation '(field-count parameter-values))
+             :data-type (make 'integer* :bits 16)
+             :derivation '(field-count parameter-values))
       (field 'parameter-values
-        :data-type (make 'repeated :times-field-name 'number-of-parameter-values
-                         :fields (vector (field 'length-of-parameter-value :data-type (make 'integer* :bits 16))
-                                         (field 'parameter-value
-                                           :data-type (make 'bytes* :size-field-name 'length-of-parameter-value)))))
-
+             :data-type (make 'repeated :times-field-name 'number-of-parameter-values
+                              :fields (vector (field 'length-of-parameter-value :data-type (make 'integer* :bits 16))
+                                              (field 'parameter-value
+                                                     :data-type (make 'bytes* :size-field-name 'length-of-parameter-value)))))
       (field 'number-of-result-column-format-codes
-        :data-type (make 'integer* :bits 16)
-        :derivation `(field-count result-column-format-codes))
+             :data-type (make 'integer* :bits 16)
+             :derivation `(field-count result-column-format-codes))
       (field 'result-column-format-codes
-        :data-type (make 'integer-array* :bits 16 :array-length-field-name 'number-of-result-column-format-codes)))))
+             :data-type (make 'integer-array* :bits 16 :array-length-field-name 'number-of-result-column-format-codes)))))
 
 ;;;
 ;;; Field derivation, e.g. message length. It is meaningful only when sending
