@@ -1,33 +1,8 @@
 ;;;
-;;; Utilities
-;;;
-
-(defun compose (&rest fns)
-  (if fns
-      (let ((fn1 (car (last fns)))
-            (fns (butlast fns)))
-        (lambda (&rest args)
-          (reduce #'funcall fns
-                  :from-end t
-                  :initial-value (apply fn1 args))))
-      #'identity))
-
-(eval-when (:compile-toplevel)
-  (defun lists-equal-p (&rest lists)
-    (let ((list1 (car lists))
-          (lists (cdr lists)))
-      (if list1
-          (if lists
-              (if (equal list1 (car lists))
-                  (apply #'lists-equal-p lists))
-              t)
-          t))))
-
-;;;
 ;;; Message data types
 ;;;
 
-(eval-when (:compile-toplevel)
+(eval-when (:compile-toplevel :load-toplevel :execute)
 
   (defclass message-data-type () ())
 
@@ -55,7 +30,7 @@
 ;;; Methods to extract type information from message-data-type
 ;;;
 
-(eval-when (:compile-toplevel)
+(eval-when (:compile-toplevel :load-toplevel :execute)
 
   (defgeneric type-information (message-data-type)
     (:documentation "Extract type information that can be used to compare whether two
@@ -93,7 +68,7 @@
 ;;; Message format
 ;;;
 
-(eval-when (:compile-toplevel)
+(eval-when (:compile-toplevel :load-toplevel :execute)
 
   (defclass field-format ()
     ((field-name :type symbol            :initarg :field-name :reader field-name)
@@ -112,15 +87,15 @@
   (defclass message-format ()
     ((format-name :type string                :initarg :format-name :reader format-name)
      (source      :type symbol                :initarg :source      :reader source) ; 'backend or 'frontend
-     (fields      :type (vector field-format) :initarg :fields      :reader fields)))
-
-  (defparameter *message-formats* ()))
+     (fields      :type (vector field-format) :initarg :fields      :reader fields))))
 
 ;;;
 ;;; Message format definitions
 ;;;
 
-(eval-when (:compile-toplevel)
+(eval-when (:compile-toplevel :load-toplevel :execute)
+
+  (defparameter *message-formats* ())
 
   (macrolet ((make (&rest args)
                `(make-instance ,@args))
@@ -195,7 +170,7 @@
 ;;; messages. There is nothing to "derive" when receiving messages.
 ;;;
 
-(eval-when (:compile-toplevel)
+(eval-when (:compile-toplevel :load-toplevel :execute)
 
   (defun form-to-derive-field-length (field-format)
     (let ((bits-per-byte 8))
@@ -241,7 +216,7 @@
 ;;; Methods to generate forms to write the value to PostgreSQL's stream
 ;;;
 
-(eval-when (:compile-toplevel)
+(eval-when (:compile-toplevel :load-toplevel :execute)
 
   (defgeneric form-to-write-in-pg-format (message-data-type value-form)
     (:documentation "Generate a form to write the value represented by value-form to
@@ -313,7 +288,7 @@
 ;;; Methods to generate the form to read the value from PostgreSQL's stream
 ;;;
 
-(eval-when (:compile-toplevel)
+(eval-when (:compile-toplevel :load-toplevel :execute)
 
   (defgeneric form-to-read-in-pg-format (message-data-type)
     (:documentation "Generate the form to read value from *standard-input* according to
@@ -338,7 +313,7 @@
 ;;; Classes of received messages
 ;;;
 
-(eval-when (:compile-toplevel)
+(eval-when (:compile-toplevel :load-toplevel :execute)
 
   (defgeneric cl-type (message-data-type)
     (:documentation "Which CL type does this message-data-type map to?"))
