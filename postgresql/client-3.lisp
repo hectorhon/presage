@@ -90,9 +90,10 @@
     (slot-boundp field-format 'derivation))
 
   (defclass message-format ()
-    ((format-name :type string                :initarg :format-name :reader format-name)
-     (source      :type symbol                :initarg :source      :reader source) ; 'backend or 'frontend
-     (fields      :type (vector field-format) :initarg :fields      :reader fields))))
+    ((format-name   :type string                :initarg :format-name   :reader format-name)
+     (from-backend  :type boolean               :initarg :from-backend  :reader from-backend)
+     (from-frontend :type boolean               :initarg :from-frontend :reader from-frontend)
+     (fields        :type (vector field-format) :initarg :fields        :reader fields))))
 
 ;;;
 ;;; Message format definitions
@@ -105,9 +106,14 @@
   (macrolet ((make (&rest args)
                `(make-instance ,@args))
              (define-message-format (format-name source &rest field-formats)
-               `(let ((message-format (make-instance 'message-format
-                                                     :format-name ,format-name :source ,source
-                                                     :fields (vector ,@field-formats))))
+               `(let ((message-format
+                       (make-instance 'message-format
+                                      :format-name ,format-name
+                                      :from-backend ,(or (eq 'backend source)
+                                                         (not (endp (member 'backend source))))
+                                      :from-frontend ,(or (eq 'frontend source)
+                                                          (not (endp (member 'frontend source))))
+                                      :fields (vector ,@field-formats))))
                   (push message-format *message-formats*)))
              (field (field-name &body body)
                `(make-instance 'field-format :field-name ,field-name ,@body)))
@@ -347,9 +353,7 @@
                                (fields message-format))))
                `(defun ,function-symbol ,args ,@body))))
     (let ((frontend-message-formats
-           (remove-if (lambda (message-format)
-                        (not (eq 'frontend (source message-format))))
-                      *message-formats*)))
+           (remove-if (complement #'from-frontend) *message-formats*)))
       `(progn ,@(mapcar #'make-send-function frontend-message-formats)))))
 
 (make-send-functions)
@@ -438,9 +442,7 @@
                                   (fields message-format)))))
              `(defclass ,(class-name-from-message-format message-format) (message) ,slots))))
     `(progn ,@(mapcar #'generate-class-from-message-format
-                      (remove-if (lambda (message-format)
-                                   (not (eq 'backend (source message-format))))
-                                 *message-formats*)))))
+                      (remove-if (complement #'from-backend) *message-formats*)))))
 
 (generate-classes-from-message-formats)
 
@@ -492,9 +494,8 @@
                                             (list ,@(loop :for key :being :the :hash-key :of candidates-grouped-by-fixed-values
                                                        :collecting key))
                                             value)))))))))))
-    (let ((candidate-message-formats (remove-if (lambda (message-format)
-                                                  (not (eq 'backend (source message-format))))
-                                                *message-formats*)))
+    (let ((candidate-message-formats
+           (remove-if (complement #'from-backend) *message-formats*)))
       `(defun parse-message-from-backend ()
          (let ((values nil))
            ,@(make-parse-forms candidate-message-formats))))))
