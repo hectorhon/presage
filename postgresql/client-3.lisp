@@ -52,16 +52,21 @@
              (list (bits message-data-type)))
 
   (defmethod type-information append ((message-data-type integer-array*))
+             ;; always unique, since the length isn't known and so can't be read
              (list (bits message-data-type)
-                   (gensym)))           ; type comparison not supported
+                   (gensym)))
 
   (defmethod type-information append ((message-data-type string*))
-             (list (gensym)))           ; always unique, since the length isn't known
+             ;; always same, since it can be read without knowing the length (by reading
+             ;; up to the null byte)
+             nil)
 
   (defmethod type-information append ((message-data-type bytes*))
-             ;; (list (size message-data-type))))
-             ;; not yet implemented
-             (list (gensym))))
+             (if (symbolp (size message-data-type))
+                 ;; unique, since the length isn't known and so can't be read
+                 (list (gensym))
+                 ;; same if the number of bytes is fixed
+                 (list (size message-data-type)))))
 
 ;;;
 ;;; Message format
@@ -76,8 +81,9 @@
 
   (defun fixed-field-p (field-format)
     (declare (field-format field-format))
-    (and (slot-exists-p (data-type field-format) 'exact-value)
-         (slot-boundp (data-type field-format) 'exact-value)))
+    (with-slots (data-type) field-format
+      (and (slot-exists-p data-type 'exact-value)
+           (slot-boundp data-type 'exact-value))))
 
   (defun derived-field-p (field-format)
     (declare (field-format field-format))
@@ -244,7 +250,7 @@
   (defun form-to-derive-field (field-format &optional message-format)
     "Generate a form to derive the value of the field. The argument message-format is
      required only for message length derivation."
-    (let ((derivation (derivation field-format)))
+    (with-slots (derivation) field-format
       (cond ((eq 'message-length derivation)
              (if (null message-format)
                  (error "The argument message-format cannot be null for message length derivation."))
@@ -309,11 +315,11 @@
                        :collecting `(,inner-field-name (aref item ,field-index)))
                 (declare (ignorable ,@(coerce inner-field-names 'list)))
                 ,@(loop :for inner-field-format :across inner-field-formats
-                    :if (derived-field-p inner-field-format)
-                    :collecting (form-to-write-in-pg-format (data-type inner-field-format)
-                                                            (form-to-derive-field inner-field-format))
-                    :else
-                    :collecting (form-to-write-in-pg-format (data-type inner-field-format) 'item)))))))
+                     :if (derived-field-p inner-field-format)
+                     :collecting (form-to-write-in-pg-format (data-type inner-field-format)
+                                                             (form-to-derive-field inner-field-format))
+                     :else
+                     :collecting (form-to-write-in-pg-format (data-type inner-field-format) 'item)))))))
 
 ;;;
 ;;; Send message
