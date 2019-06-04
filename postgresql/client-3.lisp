@@ -2,7 +2,7 @@
 ;;; Message data types
 ;;;
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
+(eval-when (:compile-toplevel)
 
   (defclass message-data-type () ())
 
@@ -29,7 +29,7 @@
 ;;; Methods to extract type information from message-data-type
 ;;;
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
+(eval-when (:compile-toplevel)
 
   (defgeneric type-information (message-data-type)
     (:documentation "Extract type information that can be used to compare whether two
@@ -72,7 +72,7 @@
 ;;; Message format
 ;;;
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
+(eval-when (:compile-toplevel)
 
   (defclass field-format ()
     ((field-name :type symbol            :initarg :field-name :reader field-name)
@@ -99,7 +99,7 @@
 ;;; Message format definitions
 ;;;
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
+(eval-when (:compile-toplevel)
 
   (defparameter *message-formats* ())
 
@@ -226,7 +226,7 @@
 ;;; messages. There is nothing to "derive" when receiving messages.
 ;;;
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
+(eval-when (:compile-toplevel)
 
   (defun form-to-derive-field-length (field-format)
     (let ((bits-per-byte 8))
@@ -280,7 +280,7 @@
 ;;; Methods to generate forms to write the value to PostgreSQL's stream
 ;;;
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
+(eval-when (:compile-toplevel)
 
   (defgeneric form-to-write-in-pg-format (message-data-type value-form)
     (:documentation "Generate a form to write the value represented by value-form to
@@ -331,30 +331,31 @@
 ;;; Send message
 ;;;
 
-(defmacro make-send-functions ()
-  (labels ((make-send-function (message-format)
-             (let* ((function-symbol
-                     (intern (string-upcase (concatenate 'string "send-" (format-name message-format)))))
-                    (args (map 'list #'field-name
-                               (remove-if (lambda (field-format)
-                                            (or (fixed-field-p field-format)
-                                                (derived-field-p field-format)))
-                                          (fields message-format))))
-                    (body (map 'list (lambda (field-format)
-                                       (cond ((fixed-field-p field-format)
-                                              (form-to-write-in-pg-format (data-type field-format)
-                                                                          (exact-value (data-type field-format))))
-                                             ((derived-field-p field-format)
-                                              (form-to-write-in-pg-format (data-type field-format)
-                                                                          (form-to-derive-field field-format message-format)))
-                                             (t
-                                              (form-to-write-in-pg-format (data-type field-format)
-                                                                          (field-name field-format)))))
-                               (fields message-format))))
-               `(defun ,function-symbol ,args ,@body))))
-    (let ((frontend-message-formats
-           (remove-if (complement #'from-frontend) *message-formats*)))
-      `(progn ,@(mapcar #'make-send-function frontend-message-formats)))))
+(eval-when (:compile-toplevel)
+  (defmacro make-send-functions ()
+    (labels ((make-send-function (message-format)
+               (let* ((function-symbol
+                       (intern (string-upcase (concatenate 'string "send-" (format-name message-format)))))
+                      (args (map 'list #'field-name
+                                 (remove-if (lambda (field-format)
+                                              (or (fixed-field-p field-format)
+                                                  (derived-field-p field-format)))
+                                            (fields message-format))))
+                      (body (map 'list (lambda (field-format)
+                                         (cond ((fixed-field-p field-format)
+                                                (form-to-write-in-pg-format (data-type field-format)
+                                                                            (exact-value (data-type field-format))))
+                                               ((derived-field-p field-format)
+                                                (form-to-write-in-pg-format (data-type field-format)
+                                                                            (form-to-derive-field field-format message-format)))
+                                               (t
+                                                (form-to-write-in-pg-format (data-type field-format)
+                                                                            (field-name field-format)))))
+                                 (fields message-format))))
+                 `(defun ,function-symbol ,args ,@body))))
+      (let ((frontend-message-formats
+             (remove-if (complement #'from-frontend) *message-formats*)))
+        `(progn ,@(mapcar #'make-send-function frontend-message-formats))))))
 
 (make-send-functions)
 
@@ -362,7 +363,7 @@
 ;;; Methods to generate the form to read the value from PostgreSQL's stream
 ;;;
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
+(eval-when (:compile-toplevel)
 
   (defgeneric form-to-read-in-pg-format (message-data-type)
     (:documentation "Generate the form to read value from *standard-input* according to
@@ -401,7 +402,7 @@
 ;;; Classes of received messages
 ;;;
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
+(eval-when (:compile-toplevel)
 
   (defgeneric cl-type (message-data-type)
     (:documentation "Which CL type does this message-data-type map to?"))
@@ -424,25 +425,25 @@
 
 (eval-when (:compile-toplevel)
   (defun class-name-from-message-format (message-format)
-    (intern (string-upcase (concatenate 'string (format-name message-format) "-message")))))
+    (intern (string-upcase (concatenate 'string (format-name message-format) "-message"))))
 
-(defmacro generate-classes-from-message-formats ()
-  (flet ((generate-class-from-message-format (message-format)
-           (let ((slots
-                  (map 'list (lambda (field-format)
-                               (with-slots (field-name data-type derivation) field-format
-                                 `(,field-name :initarg ,(intern (string-upcase field-name) :keyword)
-                                               :reader ,field-name
-                                               :type ,(cl-type (data-type field-format)))))
-                       (remove-if (lambda (field-format)
-                                    ;; TODO Maybe derived fields like msg length should be in the class?
-                                    (or (fixed-field-p field-format)
-                                        (derived-field-p field-format)
-                                        (null (field-name field-format))))
-                                  (fields message-format)))))
-             `(defclass ,(class-name-from-message-format message-format) (message) ,slots))))
-    `(progn ,@(mapcar #'generate-class-from-message-format
-                      (remove-if (complement #'from-backend) *message-formats*)))))
+  (defmacro generate-classes-from-message-formats ()
+    (flet ((generate-class-from-message-format (message-format)
+             (let ((slots
+                    (map 'list (lambda (field-format)
+                                 (with-slots (field-name data-type derivation) field-format
+                                   `(,field-name :initarg ,(intern (string-upcase field-name) :keyword)
+                                                 :reader ,field-name
+                                                 :type ,(cl-type (data-type field-format)))))
+                         (remove-if (lambda (field-format)
+                                      ;; TODO Maybe derived fields like msg length should be in the class?
+                                      (or (fixed-field-p field-format)
+                                          (derived-field-p field-format)
+                                          (null (field-name field-format))))
+                                    (fields message-format)))))
+               `(defclass ,(class-name-from-message-format message-format) (message) ,slots))))
+      `(progn ,@(mapcar #'generate-class-from-message-format
+                        (remove-if (complement #'from-backend) *message-formats*))))))
 
 (generate-classes-from-message-formats)
 
@@ -450,55 +451,56 @@
 ;;; Parse message from backend
 ;;;
 
-(defmacro make-parse-function ()
-  (labels ((make-parse-forms (candidate-message-formats &optional (field-index 0))
-             "field-index is used to track current depth in decision tree"
-             (cond ((endp candidate-message-formats)
-                    (error "No more candidates - check message format definitions."))
-                   ((endp (cdr candidate-message-formats))
-                    ;; only one candidate left, generate forms to read remaining fields
-                    (let* ((candidate (car candidate-message-formats))
-                           (remaining-fields (subseq (fields candidate) field-index)))
-                      `(,@(loop :for field :across remaining-fields
-                             :collecting `(let ((value ,(form-to-read-in-pg-format (data-type field))))
-                                            ;; let clause is needed for the side effect (read from stream)
-                                            ,(if (field-name field)
-                                                 `(setf values (acons (quote ,(field-name field)) value values))
-                                                 `(declare (ignore value)))))
-                          (let ((message (make-instance (quote ,(class-name-from-message-format candidate)))))
-                            (loop :for pair :in values :do (setf (slot-value message (car pair)) (cdr pair))
-                               :finally (return message))))))
-                   (t
-                    (flet ((current-field (message-format)
-                             (aref (fields message-format) field-index)))
-                      ;; ensure next fields have same type and have fixed value specifications
-                      (loop :for message-format :in candidate-message-formats
-                         :unless (or (eq (type-information (data-type (current-field (car candidate-message-formats))))
-                                         (type-information (data-type (current-field message-format))))
-                                     (fixed-field-p (current-field message-format)))
-                         :do (error "Expected candidates to have same message-data-types - check message format definitions."))
-                      ;; sort and group candidates by fixed values
-                      (let ((candidates-grouped-by-fixed-values
-                             (loop :for message-format :in candidate-message-formats
-                                :with hashmap = (make-hash-table :test 'eq)
-                                :do (push message-format
-                                          (gethash (exact-value (data-type (current-field message-format))) hashmap))
-                                :finally (return hashmap))))
-                        `((let ((value ,(form-to-read-in-pg-format (data-type (current-field (car candidate-message-formats))))))
-                            (cond ,@(loop :for fixed-value :being :the :hash-key :of candidates-grouped-by-fixed-values
-                                       :using (:hash-value candidates)
-                                       :collecting `((eql ,fixed-value value)
-                                                     ,@(make-parse-forms candidates (1+ field-index))))
-                                  (t (error "When parsing field number ~D, expected one of ~a, but got ~a instead."
-                                            ,field-index ; 1-indexed; happens to work because of previous incf
-                                            (list ,@(loop :for key :being :the :hash-key :of candidates-grouped-by-fixed-values
-                                                       :collecting key))
-                                            value)))))))))))
-    (let ((candidate-message-formats
-           (remove-if (complement #'from-backend) *message-formats*)))
-      `(defun parse-message-from-backend ()
-         (let ((values nil))
-           ,@(make-parse-forms candidate-message-formats))))))
+(eval-when (:compile-toplevel)
+  (defmacro make-parse-function ()
+    (labels ((make-parse-forms (candidate-message-formats &optional (field-index 0))
+               "field-index is used to track current depth in decision tree"
+               (cond ((endp candidate-message-formats)
+                      (error "No more candidates - check message format definitions."))
+                     ((endp (cdr candidate-message-formats))
+                      ;; only one candidate left, generate forms to read remaining fields
+                      (let* ((candidate (car candidate-message-formats))
+                             (remaining-fields (subseq (fields candidate) field-index)))
+                        `(,@(loop :for field :across remaining-fields
+                               :collecting `(let ((value ,(form-to-read-in-pg-format (data-type field))))
+                                              ;; let clause is needed for the side effect (read from stream)
+                                              ,(if (field-name field)
+                                                   `(setf values (acons (quote ,(field-name field)) value values))
+                                                   `(declare (ignore value)))))
+                            (let ((message (make-instance (quote ,(class-name-from-message-format candidate)))))
+                              (loop :for pair :in values :do (setf (slot-value message (car pair)) (cdr pair))
+                                 :finally (return message))))))
+                     (t
+                      (flet ((current-field (message-format)
+                               (aref (fields message-format) field-index)))
+                        ;; ensure next fields have same type and have fixed value specifications
+                        (loop :for message-format :in candidate-message-formats
+                           :unless (or (eq (type-information (data-type (current-field (car candidate-message-formats))))
+                                           (type-information (data-type (current-field message-format))))
+                                       (fixed-field-p (current-field message-format)))
+                           :do (error "Expected candidates to have same message-data-types - check message format definitions."))
+                        ;; sort and group candidates by fixed values
+                        (let ((candidates-grouped-by-fixed-values
+                               (loop :for message-format :in candidate-message-formats
+                                  :with hashmap = (make-hash-table :test 'eq)
+                                  :do (push message-format
+                                            (gethash (exact-value (data-type (current-field message-format))) hashmap))
+                                  :finally (return hashmap))))
+                          `((let ((value ,(form-to-read-in-pg-format (data-type (current-field (car candidate-message-formats))))))
+                              (cond ,@(loop :for fixed-value :being :the :hash-key :of candidates-grouped-by-fixed-values
+                                         :using (:hash-value candidates)
+                                         :collecting `((eql ,fixed-value value)
+                                                       ,@(make-parse-forms candidates (1+ field-index))))
+                                    (t (error "When parsing field number ~D, expected one of ~a, but got ~a instead."
+                                              ,field-index ; 1-indexed; happens to work because of previous incf
+                                              (list ,@(loop :for key :being :the :hash-key :of candidates-grouped-by-fixed-values
+                                                         :collecting key))
+                                              value)))))))))))
+      (let ((candidate-message-formats
+             (remove-if (complement #'from-backend) *message-formats*)))
+        `(defun parse-message-from-backend ()
+           (let ((values nil))
+             ,@(make-parse-forms candidate-message-formats)))))))
 
 (make-parse-function)
 
@@ -515,5 +517,5 @@
  (with-open-file (*standard-output* "bind.bin" :direction :output :element-type :default
  :if-exists :supersede
  :if-does-not-exist :create)
- (send-bind "dpn" "spsn" (vector) (vector)))
+ (send-bind "dpn" "spsn" (vector) (vector) (vector)))
  |#)
