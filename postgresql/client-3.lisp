@@ -112,13 +112,14 @@
   (macrolet ((make (&rest args)
                `(make-instance ,@args))
              (define-message-format (format-name source &rest field-formats)
+               ;; (when (string= "CopyInResponse" format-name)
                `(let ((message-format
                        (make-instance 'message-format
                                       :format-name ,format-name
                                       :from-backend ,(not (endp (member 'backend source)))
                                       :from-frontend ,(not (endp (member 'frontend source)))
                                       :fields (vector ,@field-formats))))
-                  (push message-format *message-formats*)))
+                  (push message-format *message-formats*)));)
              (field (field-name &body body)
                `(make-instance 'field-format :field-name ,field-name ,@body)))
 
@@ -178,7 +179,7 @@
                                                      :data-type (make 'bytes* :size 'length-of-parameter-value)))))
       (field 'number-of-result-column-format-codes
              :data-type (make 'integer* :bits 16)
-             :derivation `(field-count result-column-format-codes))
+             :derivation '(field-count result-column-format-codes))
       (field 'result-column-format-codes
              :data-type (make 'integer-array* :bits 16 :array-length-field-name 'number-of-result-column-format-codes)))
 
@@ -211,6 +212,22 @@
       (field 'identifier :data-type (make 'bytes*   :size 1 :exact-value (char-code #\d)))
       (field 'length     :data-type (make 'integer* :bits 32) :derivation 'message-length)
       (field 'data       :data-type (make 'bytes*   :size '(length (lambda (x) (- x 4))))))
+
+    (define-message-format "CopyDone" (frontend backend)
+      (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\c)))
+      (field 'length     :data-type (make 'integer* :bits 32 :exact-value 4)))
+
+    (define-message-format "CopyFail" (frontend)
+      (field 'identifier    :data-type (make 'bytes*   :size 1  :exact-value (char-code #\f)))
+      (field 'length        :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'error-message :data-type (make 'string*)))
+
+    (define-message-format "CopyInResponse" (backend)
+      (field 'identifier          :data-type (make 'bytes*   :size 1  :exact-value (char-code #\G)))
+      (field 'length              :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'textual-or-binary   :data-type (make 'integer* :bits 8))
+      (field 'number-of-columns   :data-type (make 'integer* :bits 16) :derivation '(field-count column-format-codes))
+      (field 'column-format-codes :data-type (make 'integer-array* :bits 16 :array-length-field-name 'number-of-columns)))
 
     (define-message-format "DataRow" (backend)
       (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\D)))
@@ -383,6 +400,13 @@
     `(loop :with bits-per-byte = 8       ; for the #'write-byte
         :for shift-count :downfrom (- ,(bits message-data-type) bits-per-byte) :to 0 :by bits-per-byte
         :summing (ash (read-byte *standard-input*) shift-count)))
+
+  (defmethod form-to-read-in-pg-format ((message-data-type integer-array*))
+    `(loop :with size = (cdr (assoc (quote ,(array-length-field-name message-data-type)) values))
+        :with arr = (make-array size)
+        :for i :from 0 :below size
+        :do (setf (aref arr i) ,(form-to-read-in-pg-format (make-instance 'integer* :bits (bits message-data-type))))
+        :finally (return arr)))
 
   (defmethod form-to-read-in-pg-format ((message-data-type string*))
     `(coerce (loop :with last-read-character
