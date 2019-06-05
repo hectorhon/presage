@@ -18,8 +18,14 @@
     ((exact-value :type string :initarg :exact-value :reader exact-value)))
 
   (defclass bytes* (message-data-type)
-    ((size        :type (or integer symbol) :initarg :size        :reader size) ; if symbol, it refers to a field-name
-     (exact-value :type (unsigned-byte 8)   :initarg :exact-value :reader exact-value)))
+    ((size :type (or integer symbol t)
+           :initarg :size
+           :reader size
+           :documentation "If integer, it is taken to be the size.
+                           If symbol, the size is equals to the field it names.
+                           If `(<field-name> (lambda (x) ...)), the size is the
+                           value provided by the named field, transformed.")
+     (exact-value :type (unsigned-byte 8) :initarg :exact-value :reader exact-value)))
 
   (defclass repeated (message-data-type)
     ((times-field-name  :type symbol                :initarg :times-field-name  :reader times-field-name)
@@ -109,10 +115,8 @@
                `(let ((message-format
                        (make-instance 'message-format
                                       :format-name ,format-name
-                                      :from-backend ,(or (eq 'backend source)
-                                                         (not (endp (member 'backend source))))
-                                      :from-frontend ,(or (eq 'frontend source)
-                                                          (not (endp (member 'frontend source))))
+                                      :from-backend ,(not (endp (member 'backend source)))
+                                      :from-frontend ,(not (endp (member 'frontend source)))
                                       :fields (vector ,@field-formats))))
                   (push message-format *message-formats*)))
              (field (field-name &body body)
@@ -121,7 +125,7 @@
     ;; Fields named 'identifier are not counted towards the message length, see the
     ;; given lengths in the spec.
 
-    (define-message-format "StartupMessage" 'frontend
+    (define-message-format "StartupMessage" (frontend)
       (field 'length   :data-type (make 'integer* :bits 32) :derivation 'message-length)
       (field 'protocol-version-number :data-type (make 'integer* :bits 32 :exact-value 196608))
       (field nil       :data-type (make 'string* :exact-value "user"))
@@ -130,29 +134,29 @@
       (field 'database :data-type (make 'string*))
       (field nil       :data-type (make 'bytes* :size 1 :exact-value 0)))
 
-    (define-message-format "AuthenticationOk" 'backend
+    (define-message-format "AuthenticationOk" (backend)
       (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\R)))
       (field 'length     :data-type (make 'integer* :bits 32 :exact-value 8))
       (field nil         :data-type (make 'integer* :bits 32 :exact-value 0)))
 
-    (define-message-format "AuthenticationMD5Password" 'backend
+    (define-message-format "AuthenticationMD5Password" (backend)
       (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\R)))
       (field 'length     :data-type (make 'integer* :bits 32 :exact-value 12))
       (field nil         :data-type (make 'integer* :bits 32 :exact-value 5))
       (field 'salt       :data-type (make 'bytes*   :size 4)))
 
-    (define-message-format "AuthenticationCleartextPassword" 'backend
+    (define-message-format "AuthenticationCleartextPassword" (backend)
       (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\R)))
       (field 'length     :data-type (make 'integer* :bits 32 :exact-value 8))
       (field nil         :data-type (make 'integer* :bits 32 :exact-value 3)))
 
-    (define-message-format "BackendKeyData" 'backend
+    (define-message-format "BackendKeyData" (backend)
       (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\K)))
       (field 'length     :data-type (make 'integer* :bits 32 :exact-value 12))
       (field 'process-id :data-type (make 'integer* :bits 32))
       (field 'secret-key :data-type (make 'integer* :bits 32)))
 
-    (define-message-format "Bind" 'frontend
+    (define-message-format "Bind" (frontend)
       (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\B)))
       (field 'length     :data-type (make 'integer* :bits 32) :derivation 'message-length)
       (field 'destination-portal-name        :data-type (make 'string*))
@@ -178,34 +182,37 @@
       (field 'result-column-format-codes
              :data-type (make 'integer-array* :bits 16 :array-length-field-name 'number-of-result-column-format-codes)))
 
-    (define-message-format "BindComplete" 'backend
+    (define-message-format "BindComplete" (backend)
       (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\2)))
       (field 'length     :data-type (make 'integer* :bits 32 :exact-value 4)))
 
-    (define-message-format "CancelRequest" 'frontend
+    (define-message-format "CancelRequest" (frontend)
       (field 'length              :data-type (make 'integer* :bits 32 :exact-value 16))
       (field 'cancel-request-code :data-type (make 'integer* :bits 32 :exact-value 80877102))
       (field 'process-id          :data-type (make 'integer* :bits 32))
       (field 'secret-key          :data-type (make 'integer* :bits 32)))
 
-    (define-message-format "Close" 'frontend
+    (define-message-format "Close" (frontend)
       (field 'identifier :data-type (make 'bytes*   :size 1 :exact-value (char-code #\C)))
       (field 'length     :data-type (make 'integer* :bits 32) :derivation 'message-length)
       (field 'close-what :data-type (make 'bytes*   :size 1)) ; #\S to close a prepared statement, #\P to close a portal
       (field 'statement-or-portal-name :data-type (make 'string*)))
 
-    (define-message-format "CloseComplete" 'backend
+    (define-message-format "CloseComplete" (backend)
       (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\3)))
       (field 'length     :data-type (make 'integer* :bits 32 :exact-value 4)))
 
-    (define-message-format "CommandComplete" 'backend
+    (define-message-format "CommandComplete" (backend)
       (field 'identifier  :data-type (make 'bytes*   :size 1  :exact-value (char-code #\C)))
       (field 'length      :data-type (make 'integer* :bits 32) :derivation 'message-length)
       (field 'command-tag :data-type (make 'string*)))
 
-    ;; copy not yet implemented
+    (define-message-format "CopyData" (frontend backend)
+      (field 'identifier :data-type (make 'bytes*   :size 1 :exact-value (char-code #\d)))
+      (field 'length     :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'data       :data-type (make 'bytes*   :size '(length (lambda (x) (- x 4))))))
 
-    (define-message-format "DataRow" 'backend
+    (define-message-format "DataRow" (backend)
       (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\D)))
       (field 'length     :data-type (make 'integer* :bits 32) :derivation 'message-length)
       (field 'number-of-column-values
@@ -239,7 +246,10 @@
         (string*
          `(1+ (length ,(field-name field-format))))
         (bytes*
-         (size (data-type field-format)))
+         (with-slots (size) (data-type field-format)
+           (cond ((integerp size) size)
+                 ((symbolp size) size)
+                 (t `(length ,(field-name field-format))))))
         (repeated
          (let* ((repeated-message-data-type (data-type field-format))
                 (inner-field-formats (fields repeated-message-data-type))
@@ -383,9 +393,10 @@
 
   (defmethod form-to-read-in-pg-format ((message-data-type bytes*))
     `(loop :with size = ,(with-slots (size) message-data-type
-                           (if (symbolp size)
-                               `(cdr (assoc (quote ,size) values))
-                               size))
+                           (cond ((integerp size) size)
+                                 ((listp size) (destructuring-bind (field-name transform) size
+                                                 `(funcall ,transform (cdr (assoc (quote ,field-name) values)))))
+                                 ((symbolp size) `(cdr (assoc (quote ,size) values)))))
         :with arr = (make-array size)
         :for i :from 0 :below size
         :do (setf (aref arr i) (read-byte *standard-input*))
@@ -468,7 +479,11 @@
                                                    `(setf values (acons (quote ,(field-name field)) value values))
                                                    `(declare (ignore value)))))
                             (let ((message (make-instance (quote ,(class-name-from-message-format candidate)))))
-                              (loop :for pair :in values :do (setf (slot-value message (car pair)) (cdr pair))
+                              (loop :for pair :in values
+                                 ;; if slot-exists-p needed for CopyData, where data
+                                 ;; length is transformed from message length
+                                 :if (slot-exists-p message (car pair))
+                                 :do (setf (slot-value message (car pair)) (cdr pair))
                                  :finally (return message))))))
                      (t
                       (flet ((current-field (message-format)
@@ -487,6 +502,8 @@
                                             (gethash (exact-value (data-type (current-field message-format))) hashmap))
                                   :finally (return hashmap))))
                           `((let ((value ,(form-to-read-in-pg-format (data-type (current-field (car candidate-message-formats))))))
+                              ;; can't do this here because field name might not be the same
+                              ;; (setf values (acons (quote ,(field-name field)) value values))
                               (cond ,@(loop :for fixed-value :being :the :hash-key :of candidates-grouped-by-fixed-values
                                          :using (:hash-value candidates)
                                          :collecting `((eql ,fixed-value value)
@@ -518,4 +535,18 @@
  :if-exists :supersede
  :if-does-not-exist :create)
  (send-bind "dpn" "spsn" (vector) (vector) (vector)))
+ |#)
+
+;; Test send copydata
+(#|
+ (with-open-file (*standard-output* "copydata.bin" :direction :output :element-type :default
+ :if-exists :supersede
+ :if-does-not-exist :create)
+ (send-copydata (map 'vector #'char-code (vector #\o #\n #\e))))
+ |#)
+
+;; Test read copydata
+(#|
+ (with-open-file (*standard-input* "copydata.bin" :element-type :default)
+ (parse-message-from-backend))
  |#)
