@@ -1,3 +1,6 @@
+(eval-when (:compile-toplevel)
+  (defconstant bits-per-byte 8))
+
 ;;;
 ;;; Message data types
 ;;;
@@ -341,7 +344,7 @@
                                                     :fields (vector (field 'parameter-object-id :data-type (make 'integer* :bits 32))))))
 
     ;; (define-message-format "ParameterStatus" (backend)
-      
+
 
     ))
 
@@ -353,32 +356,31 @@
 (eval-when (:compile-toplevel)
 
   (defun form-to-derive-field-length (field-format)
-    (let ((bits-per-byte 8))
-      (ecase (type-of (data-type field-format))
-        (integer*
-         `(/ ,(bits (data-type field-format)) ,bits-per-byte))
-        (integer-array*
+    (ecase (type-of (data-type field-format))
+      (integer*
+       (/ (bits (data-type field-format)) bits-per-byte))
+      (integer-array*
+       `(* (length ,(field-name field-format))
+           ,(/ (bits (data-type field-format)) bits-per-byte)))
+      (string*
+       `(1+ (length ,(field-name field-format))))
+      (bytes*
+       (with-slots (size) (data-type field-format)
+         (cond ((integerp size) (if (eql -1 size) 0 size))
+               ((symbolp size) size)
+               (t `(length ,(field-name field-format))))))
+      (repeated
+       (let* ((repeated-message-data-type (data-type field-format))
+              (inner-field-formats (fields repeated-message-data-type))
+              (inner-field-names (map 'vector #'field-name inner-field-formats)))
          `(* (length ,(field-name field-format))
-             (/ ,(bits (data-type field-format)) ,bits-per-byte)))
-        (string*
-         `(1+ (length ,(field-name field-format))))
-        (bytes*
-         (with-slots (size) (data-type field-format)
-           (cond ((integerp size) (if (eql -1 size) 0 size))
-                 ((symbolp size) size)
-                 (t `(length ,(field-name field-format))))))
-        (repeated
-         (let* ((repeated-message-data-type (data-type field-format))
-                (inner-field-formats (fields repeated-message-data-type))
-                (inner-field-names (map 'vector #'field-name inner-field-formats)))
-           `(* (length ,(field-name field-format))
-               (loop :for item :across ,(field-name field-format)
-                  :summing (let ,(loop :for inner-field-name :across inner-field-names
-                                    :for field-index :upfrom 0
-                                    :collecting `(,inner-field-name (aref item ,field-index)))
-                             (declare (ignorable ,@(coerce inner-field-names 'list)))
-                             (+ ,@(loop :for field-format :across inner-field-formats
-                                     :collecting (form-to-derive-field-length field-format)))))))))))
+             (loop :for item :across ,(field-name field-format)
+                :summing (let ,(loop :for inner-field-name :across inner-field-names
+                                  :for field-index :upfrom 0
+                                  :collecting `(,inner-field-name (aref item ,field-index)))
+                           (declare (ignorable ,@(coerce inner-field-names 'list)))
+                           (+ ,@(loop :for field-format :across inner-field-formats
+                                   :collecting (form-to-derive-field-length field-format))))))))))
 
   (defun form-to-derive-field (field-format &optional message-format)
     "Generate a form to derive the value of the field. The argument message-format is
@@ -419,10 +421,9 @@
 
   (defmethod form-to-write-in-pg-format ((message-data-type integer*) value-form)
     (let ((sym (gensym)))
-      `(loop :with bits-per-byte = 8    ; for the #'write-byte
-          :with ,sym = ,value-form
-          :for pos :downfrom (- ,(bits message-data-type) bits-per-byte) :to 0 :by bits-per-byte
-          :do (write-byte (ldb (byte bits-per-byte pos) ,sym) *standard-output*))))
+      `(loop :with ,sym = ,value-form
+          :for pos :downfrom ,(- (bits message-data-type) bits-per-byte) :to 0 :by ,bits-per-byte
+          :do (write-byte (ldb (byte ,bits-per-byte pos) ,sym) *standard-output*))))
 
   (defmethod form-to-write-in-pg-format ((message-data-type integer-array*) value-form)
     `(loop :for integer :across ,value-form
@@ -435,8 +436,10 @@
   (defmethod form-to-write-in-pg-format ((message-data-type bytes*) value-form)
     (if (and (slot-boundp message-data-type 'size)
              (eql 1 (size message-data-type)))
-        `(unless (eql #\null ,value-form)
-           (write-byte ,value-form *standard-output*))
+        (let ((sym (gensym)))
+          `(let ((,sym ,value-form))
+             (unless (eql #\null ,sym)
+               (write-byte ,sym *standard-output*))))
         `(loop :for byt :across ,value-form
             :unless (eql #\null byt)
             :do (write-byte byt *standard-output*))))
@@ -499,8 +502,7 @@
                      the format specified by message-data-type."))
 
   (defmethod form-to-read-in-pg-format ((message-data-type integer*))
-    `(loop :with bits-per-byte = 8       ; for the #'write-byte
-        :for shift-count :downfrom (- ,(bits message-data-type) bits-per-byte) :to 0 :by bits-per-byte
+    `(loop :for shift-count :downfrom ,(- (bits message-data-type) bits-per-byte) :to 0 :by ,bits-per-byte
         :summing (ash (read-byte *standard-input*) shift-count)))
 
   (defmethod form-to-read-in-pg-format ((message-data-type integer-array*))
