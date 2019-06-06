@@ -130,15 +130,6 @@
     ;; Fields named 'identifier are not counted towards the message length, see the
     ;; given lengths in the spec.
 
-    (define-message-format "StartupMessage" (frontend)
-      (field 'length   :data-type (make 'integer* :bits 32) :derivation 'message-length)
-      (field 'protocol-version-number :data-type (make 'integer* :bits 32 :exact-value 196608))
-      (field nil       :data-type (make 'string* :exact-value "user"))
-      (field 'user     :data-type (make 'string*))
-      (field nil       :data-type (make 'string* :exact-value "database"))
-      (field 'database :data-type (make 'string*))
-      (field nil       :data-type (make 'bytes* :size 1 :exact-value 0)))
-
     (define-message-format "AuthenticationOk" (backend)
       (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\R)))
       (field 'length     :data-type (make 'integer* :bits 32 :exact-value 8))
@@ -361,7 +352,63 @@
                                                     :fields (vector (field 'parameter-data-type
                                                                            :data-type (make 'integer* :bits 32))))))
 
-    ))
+    (define-message-format "ParseComplete" (backend)
+      (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\1)))
+      (field 'length     :data-type (make 'integer* :bits 32 :exact-value 4)))
+
+    (define-message-format "PasswordMessage" (frontend)
+      (field 'identifier :data-type (make 'bytes*   :size 1 :exact-value (char-code #\p)))
+      (field 'length     :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'password   :data-type (make 'string*)))
+
+    (define-message-format "PortalSuspended" (backend)
+      (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\s)))
+      (field 'length     :data-type (make 'integer* :bits 32 :exact-value 4)))
+
+    (define-message-format "Query" (frontend)
+      (field 'identifier   :data-type (make 'bytes*   :size 1 :exact-value (char-code #\s)))
+      (field 'length       :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'query-string :data-type (make 'string*)))
+
+    (define-message-format "ReadyForQuery" (backend)
+      (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\Z)))
+      (field 'length     :data-type (make 'integer* :bits 32 :exact-value 5))
+      (field 'backend-transaction-status-indicator :data-type (make 'bytes* :size 1)))
+
+    (define-message-format "RowDescription" (backend)
+      (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\T)))
+      (field 'length     :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'number-of-fields-per-row :data-type (make 'integer* :bits 16))
+      (field 'field-descriptions
+             :data-type (make 'repeated :times-field-name 'number-of-fields-per-row
+                              :fields (vector (field 'name :data-type (make 'string*))
+                                              (field 'specific-table-column-p :data-type (make 'integer* :bits 32))
+                                              (field 'column-attribute-number :data-type (make 'integer* :bits 16))
+                                              (field 'object-id               :data-type (make 'integer* :bits 32))
+                                              (field 'data-type-size          :data-type (make 'integer* :bits 16))
+                                              (field 'type-modifier           :data-type (make 'integer* :bits 32))
+                                              (field 'format-code             :data-type (make 'integer* :bits 16))))))
+
+    (define-message-format "SSLRequest" (frontend)
+      (field 'length           :data-type (make 'integer* :bits 32 :exact-value 8))
+      (field 'ssl-request-code :data-type (make 'integer* :bits 32 :exact-value 80877103)))
+
+    (define-message-format "StartupMessage" (frontend)
+      (field 'length   :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'protocol-version-number :data-type (make 'integer* :bits 32 :exact-value 196608))
+      (field nil       :data-type (make 'string* :exact-value "user"))
+      (field 'user     :data-type (make 'string*))
+      (field nil       :data-type (make 'string* :exact-value "database"))
+      (field 'database :data-type (make 'string*))
+      (field nil       :data-type (make 'bytes* :size 1 :exact-value 0)))
+
+    (define-message-format "Sync" (frontend)
+      (field 'identifier :data-type (make 'bytes* :size 1 :exact-value (char-code #\S)))
+      (field 'length     :data-type (make 'integer* :bits 32 :exact-value 4)))
+
+    (define-message-format "Terminate" (frontend)
+      (field 'identifier :data-type (make 'bytes* :size 1 :exact-value (char-code #\S)))
+      (field 'length     :data-type (make 'integer* :bits 32 :exact-value 4)))))
 
 ;;;
 ;;; Field derivation, e.g. message length. It is meaningful only when sending
