@@ -28,8 +28,9 @@
      (exact-value :type (unsigned-byte 8) :initarg :exact-value :reader exact-value)))
 
   (defclass repeated (message-data-type)
-    ((times-field-name  :type symbol                :initarg :times-field-name  :reader times-field-name)
-     (fields            :type (vector field-format) :initarg :fields            :reader fields))))
+    ((times-field-name      :type symbol                :initarg :times-field-name      :reader times-field-name)
+     (until-first-field-eql :type t                     :initarg :until-first-field-eql :reader until-first-field-eql)
+     (fields                :type (vector field-format) :initarg :fields                :reader fields))))
 
 ;;;
 ;;; Methods to extract type information from message-data-type
@@ -196,7 +197,7 @@
     (define-message-format "Close" (frontend)
       (field 'identifier :data-type (make 'bytes*   :size 1 :exact-value (char-code #\C)))
       (field 'length     :data-type (make 'integer* :bits 32) :derivation 'message-length)
-      (field 'close-what :data-type (make 'bytes*   :size 1)) ; #\S to close a prepared statement, #\P to close a portal
+      (field 'close-what :data-type (make 'bytes*   :size 1))
       (field 'statement-or-portal-name :data-type (make 'string*)))
 
     (define-message-format "CloseComplete" (backend)
@@ -204,7 +205,7 @@
       (field 'length     :data-type (make 'integer* :bits 32 :exact-value 4)))
 
     (define-message-format "CommandComplete" (backend)
-      (field 'identifier  :data-type (make 'bytes*   :size 1  :exact-value (char-code #\C)))
+      (field 'identifier  :data-type (make 'bytes*   :size 1 :exact-value (char-code #\C)))
       (field 'length      :data-type (make 'integer* :bits 32) :derivation 'message-length)
       (field 'command-tag :data-type (make 'string*)))
 
@@ -218,19 +219,33 @@
       (field 'length     :data-type (make 'integer* :bits 32 :exact-value 4)))
 
     (define-message-format "CopyFail" (frontend)
-      (field 'identifier    :data-type (make 'bytes*   :size 1  :exact-value (char-code #\f)))
+      (field 'identifier    :data-type (make 'bytes*   :size 1 :exact-value (char-code #\f)))
       (field 'length        :data-type (make 'integer* :bits 32) :derivation 'message-length)
       (field 'error-message :data-type (make 'string*)))
 
     (define-message-format "CopyInResponse" (backend)
-      (field 'identifier          :data-type (make 'bytes*   :size 1  :exact-value (char-code #\G)))
+      (field 'identifier          :data-type (make 'bytes*   :size 1 :exact-value (char-code #\G)))
+      (field 'length              :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'textual-or-binary   :data-type (make 'integer* :bits 8))
+      (field 'number-of-columns   :data-type (make 'integer* :bits 16) :derivation '(field-count column-format-codes))
+      (field 'column-format-codes :data-type (make 'integer-array* :bits 16 :array-length-field-name 'number-of-columns)))
+
+    (define-message-format "CopyOutResponse" (backend)
+      (field 'identifier          :data-type (make 'bytes*   :size 1 :exact-value (char-code #\H)))
+      (field 'length              :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'textual-or-binary   :data-type (make 'integer* :bits 8))
+      (field 'number-of-columns   :data-type (make 'integer* :bits 16) :derivation '(field-count column-format-codes))
+      (field 'column-format-codes :data-type (make 'integer-array* :bits 16 :array-length-field-name 'number-of-columns)))
+
+    (define-message-format "CopyBothResponse" (backend)
+      (field 'identifier          :data-type (make 'bytes*   :size 1 :exact-value (char-code #\W)))
       (field 'length              :data-type (make 'integer* :bits 32) :derivation 'message-length)
       (field 'textual-or-binary   :data-type (make 'integer* :bits 8))
       (field 'number-of-columns   :data-type (make 'integer* :bits 16) :derivation '(field-count column-format-codes))
       (field 'column-format-codes :data-type (make 'integer-array* :bits 16 :array-length-field-name 'number-of-columns)))
 
     (define-message-format "DataRow" (backend)
-      (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\D)))
+      (field 'identifier :data-type (make 'bytes*   :size 1 :exact-value (char-code #\D)))
       (field 'length     :data-type (make 'integer* :bits 32) :derivation 'message-length)
       (field 'number-of-column-values
              :data-type (make 'integer* :bits 16)
@@ -242,6 +257,91 @@
                                                      :derivation '(field-length column-value))
                                               (field 'column-value
                                                      :data-type (make 'bytes* :size 'length-of-column-value))))))
+
+    (define-message-format "Describe" (frontend)
+      (field 'identifier    :data-type (make 'bytes*   :size 1 :exact-value (char-code #\D)))
+      (field 'length        :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'describe-what :data-type (make 'bytes*   :size 1)) ; #\S to close a prepared statement, #\P to close a portal
+      (field 'statement-or-portal-name :data-type (make 'string*)))
+
+    (define-message-format "EmptyQueryResponse" (backend)
+      (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\I)))
+      (field 'length     :data-type (make 'integer* :bits 32 :exact-value 4)))
+
+    (define-message-format "ErrorResponse" (backend)
+      (field 'identifier   :data-type (make 'bytes*   :size 1 :exact-value (char-code #\E)))
+      (field 'length       :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'error-fields :data-type (make 'repeated :until-first-field-eql 0
+                                            :fields (vector (field 'field-type-code :data-type (make 'bytes* :size 1))
+                                                            (field 'field-value     :data-type (make 'string*))))))
+
+    (define-message-format "Execute" (frontend)
+      (field 'identifier    :data-type (make 'bytes*   :size 1 :exact-value (char-code #\E)))
+      (field 'length        :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'portal-name   :data-type (make 'string*))
+      (field 'max-row-count :data-type (make 'integer* :bits 32)))
+
+    (define-message-format "Flush" (frontend)
+      (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\H)))
+      (field 'length     :data-type (make 'integer* :bits 32 :exact-value 4)))
+
+    (define-message-format "FunctionCall" (frontend)
+      (field 'identifier          :data-type (make 'bytes*   :size 1 :exact-value (char-code #\F)))
+      (field 'length              :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'function-object-id  :data-type (make 'integer* :bits 32))
+      (field 'number-of-argument-format-codes :data-type (make 'integer* :bits 16))
+      (field 'argument-format-codes           :data-type (make 'integer-array* :bits 16
+                                                               :array-length-field-name 'number-of-argument-format-codes))
+      (field 'number-of-arguments :data-type (make 'integer* :bits 16) :derivation '(field-count arguments))
+      (field 'arguments :data-type (make 'repeated :times-field-name 'number-of-arguments
+                                         :fields (vector (field 'length-of-argument-value
+                                                                :data-type (make 'integer* :bits 32)
+                                                                :derivation '(field-length argument-value))
+                                                         (field 'argument-value
+                                                                :data-type (make 'bytes* :size 'length-of-argument-value)))))
+      (field 'function-result-format-code :data-type (make 'integer* :bits 16)))
+
+    (define-message-format "FunctionCallResponse" (backend)
+      (field 'identifier                   :data-type (make 'bytes*   :size 1 :exact-value (char-code #\V)))
+      (field 'length                       :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'function-result-value-length :data-type (make 'integer* :bits 32))
+      (field 'function-result-value        :data-type (make 'bytes*   :size 'function-result-value-length)))
+
+    (define-message-format "NegotiateProtocolVersion" (backend)
+      (field 'identifier                              :data-type (make 'bytes*   :size 1 :exact-value (char-code #\v)))
+      (field 'length                                  :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'newest-supported-minor-protocol-version :data-type (make 'integer* :bits 32))
+      (field 'number-of-unrecognized-protocol-options :data-type (make 'integer* :bits 32))
+      (field 'unrecognized-protocol-options :data-type (make 'repeated :times-field-name 'number-of-unrecognized-protocol-options
+                                                             :fields (vector (field 'protocol-option-name :data-type (make 'string*))))))
+
+    (define-message-format "NoData" (backend)
+      (field 'identifier :data-type (make 'bytes*   :size 1  :exact-value (char-code #\n)))
+      (field 'length     :data-type (make 'integer* :bits 32 :exact-value 4)))
+
+    (define-message-format "NoticeResponse" (backend)
+      (field 'identifier    :data-type (make 'bytes*   :size 1 :exact-value (char-code #\N)))
+      (field 'length        :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'notice-fields :data-type (make 'repeated :until-first-field-eql 0
+                                             :fields (vector (field 'field-type-code :data-type (make 'bytes* :size 1))
+                                                             (field 'field-value     :data-type (make 'string*))))))
+
+    (define-message-format "NotificationResponse" (backend)
+      (field 'identifier          :data-type (make 'bytes*   :size 1 :exact-value (char-code #\A)))
+      (field 'length              :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'process-id          :data-type (make 'integer* :bits 32))
+      (field 'notify-channel-name :data-type (make 'string*))
+      (field 'notify-payload      :data-type (make 'string*)))
+
+    (define-message-format "ParameterDescription" (backend)
+      (field 'identifier           :data-type (make 'bytes*   :size 1 :exact-value (char-code #\t)))
+      (field 'length               :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'number-of-parameters :data-type (make 'integer* :bits 16))
+      (field 'parameter-object-ids :data-type (make 'repeated :times-field-name 'number-of-parameters
+                                                    :fields (vector (field 'parameter-object-id :data-type (make 'integer* :bits 32))))))
+
+    ;; (define-message-format "ParameterStatus" (backend)
+      
 
     ))
 
@@ -264,7 +364,7 @@
          `(1+ (length ,(field-name field-format))))
         (bytes*
          (with-slots (size) (data-type field-format)
-           (cond ((integerp size) size)
+           (cond ((integerp size) (if (eql -1 size) 0 size))
                  ((symbolp size) size)
                  (t `(length ,(field-name field-format))))))
         (repeated
@@ -335,8 +435,10 @@
   (defmethod form-to-write-in-pg-format ((message-data-type bytes*) value-form)
     (if (and (slot-boundp message-data-type 'size)
              (eql 1 (size message-data-type)))
-        `(write-byte ,value-form *standard-output*)
+        `(unless (eql #\null ,value-form)
+           (write-byte ,value-form *standard-output*))
         `(loop :for byt :across ,value-form
+            :unless (eql #\null byt)
             :do (write-byte byt *standard-output*))))
 
   (defmethod form-to-write-in-pg-format ((message-data-type repeated) value-form)
@@ -416,22 +518,33 @@
              'string))
 
   (defmethod form-to-read-in-pg-format ((message-data-type bytes*))
-    `(loop :with size = ,(with-slots (size) message-data-type
-                           (cond ((integerp size) size)
-                                 ((listp size) (destructuring-bind (field-name transform) size
-                                                 `(funcall ,transform (cdr (assoc (quote ,field-name) values)))))
-                                 ((symbolp size) `(cdr (assoc (quote ,size) values)))))
-        :with arr = (make-array size)
-        :for i :from 0 :below size
-        :do (setf (aref arr i) (read-byte *standard-input*))
-        :finally (if (eql 1 (length arr))
-                     (return (aref arr 0))
-                     (return arr))))
+    `(let ((size ,(with-slots (size) message-data-type
+                    (cond ((integerp size) size)
+                          ((listp size) (destructuring-bind (field-name transform) size
+                                          `(funcall ,transform (cdr (assoc (quote ,field-name) values)))))
+                          ((symbolp size) `(cdr (assoc (quote ,size) values)))))))
+       (if (not (eql size -1))          ; -1 means null sql value - NIL will be returned
+           (loop :with arr = (make-array size)
+              :for i :from 0 :below size
+              :do (setf (aref arr i) (read-byte *standard-input*))
+              :finally (if (eql 1 (length arr))
+                           (return (aref arr 0))
+                           (return arr))))))
 
   (defmethod form-to-read-in-pg-format ((message-data-type repeated))
-    `(loop :for i :from 0 :below (cdr (assoc (quote ,(times-field-name message-data-type)) values))
-        :collecting (list ,@(loop :for inner-field-format :across (fields message-data-type)
-                               :collecting (form-to-read-in-pg-format (data-type inner-field-format)))))))
+    (cond ((slot-boundp message-data-type 'times-field-name)
+           `(loop :for i :from 0 :below (cdr (assoc (quote ,(times-field-name message-data-type)) values))
+               :collecting (list ,@(loop :for inner-field-format :across (fields message-data-type)
+                                      :collecting (form-to-read-in-pg-format (data-type inner-field-format))))))
+          ((slot-boundp message-data-type 'until-first-field-eql)
+           `(loop :for first-value = ,(form-to-read-in-pg-format (data-type (aref (fields message-data-type) 0)))
+               :if (eql ,(until-first-field-eql message-data-type) first-value)
+               :do (return items)
+               :else
+               :collecting (list first-value
+                                 ,@(loop :for inner-field-format :across (fields message-data-type)
+                                      :collecting (form-to-read-in-pg-format (data-type inner-field-format))))
+               :into items)))))
 
 ;;;
 ;;; Classes of received messages
@@ -449,7 +562,8 @@
   (defmethod cl-type ((message-data-type string*)) 'string)
 
   (defmethod cl-type ((message-data-type bytes*))
-    ;; byte1 will be stored as single byte, byteN will be stored as vector
+    ;; byte1 will be stored as single byte, null byte1 will be stored as nil, byteN will
+    ;; be stored as vector
     t)
 
   (defmethod cl-type ((message-data-type repeated))
