@@ -116,7 +116,7 @@
   (macrolet ((make (&rest args)
                `(make-instance ,@args))
              (define-message-format (format-name source &rest field-formats)
-               ;; (when (string= "CopyInResponse" format-name)
+               ;; (when (string= "Parse" format-name)
                `(let ((message-format
                        (make-instance 'message-format
                                       :format-name ,format-name
@@ -343,8 +343,23 @@
       (field 'parameter-object-ids :data-type (make 'repeated :times-field-name 'number-of-parameters
                                                     :fields (vector (field 'parameter-object-id :data-type (make 'integer* :bits 32))))))
 
-    ;; (define-message-format "ParameterStatus" (backend)
+    (define-message-format "ParameterStatus" (backend)
+      (field 'identifier      :data-type (make 'bytes*   :size 1 :exact-value (char-code #\S)))
+      (field 'length          :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'parameter-name  :data-type (make 'string*))
+      (field 'parameter-value :data-type (make 'string*)))
 
+    (define-message-format "Parse" (frontend)
+      (field 'identifier :data-type (make 'bytes*   :size 1 :exact-value (char-code #\P)))
+      (field 'length     :data-type (make 'integer* :bits 32) :derivation 'message-length)
+      (field 'destination-prepared-statement-name :data-type (make 'string*))
+      (field 'query-string                        :data-type (make 'string*))
+      (field 'number-of-parameter-data-types
+             :data-type (make 'integer* :bits 16)
+             :derivation '(field-count parameter-data-types))
+      (field 'parameter-data-types :data-type (make 'repeated :times-field-name 'number-of-parameter-data-types
+                                                    :fields (vector (field 'parameter-data-type
+                                                                           :data-type (make 'integer* :bits 32))))))
 
     ))
 
@@ -438,10 +453,10 @@
              (eql 1 (size message-data-type)))
         (let ((sym (gensym)))
           `(let ((,sym ,value-form))
-             (unless (eql #\null ,sym)
+             (unless (eql 0 ,sym)
                (write-byte ,sym *standard-output*))))
         `(loop :for byt :across ,value-form
-            :unless (eql #\null byt)
+            :unless (eql 0 byt)
             :do (write-byte byt *standard-output*))))
 
   (defmethod form-to-write-in-pg-format ((message-data-type repeated) value-form)
@@ -453,11 +468,12 @@
                        :collecting `(,inner-field-name (aref item ,field-index)))
                 (declare (ignorable ,@(coerce inner-field-names 'list)))
                 ,@(loop :for inner-field-format :across inner-field-formats
+                     :for field-index :upfrom 0
                      :if (derived-field-p inner-field-format)
                      :collecting (form-to-write-in-pg-format (data-type inner-field-format)
                                                              (form-to-derive-field inner-field-format))
                      :else
-                     :collecting (form-to-write-in-pg-format (data-type inner-field-format) 'item)))))))
+                     :collecting (form-to-write-in-pg-format (data-type inner-field-format) `(aref item ,field-index))))))))
 
 ;;;
 ;;; Send message
