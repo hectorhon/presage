@@ -412,7 +412,7 @@
     `(coerce (loop :with last-read-character
                 :collecting (let ((c (read-char)))
                               (setf last-read-character c))
-                :until (eql #\0 last-read-character))
+                :until (eql #\null last-read-character))
              'string))
 
   (defmethod form-to-read-in-pg-format ((message-data-type bytes*))
