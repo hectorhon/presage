@@ -82,15 +82,25 @@
    (number-of-result-column-format-codes :type integer :initarg :number-of-result-column-format-codes)
    (result-column-format-codes           :type list    :initarg :result-column-format-codes)))
 
-(defclass execute-message (frontend-message)
-  ((portal-name                  :type string :initarg :portal-name)
-   (max-number-of-rows-to-return :type integer :initarg :max-number-of-rows-to-return)))
-
 (defclass parameter-value ()
   ((parameter-value-length :type integer                :initarg :parameter-value-length)
    (parameter-value        :type (vector unsigned-byte) :initarg :parameter-value)))
 
+(defclass execute-message (frontend-message)
+  ((portal-name                  :type string :initarg :portal-name)
+   (max-number-of-rows-to-return :type integer :initarg :max-number-of-rows-to-return)))
+
 (defclass sync-message (frontend-message) ())
+
+(defclass describe-message (frontend-message)
+  ((prepared-statement-or-portal      :type unsigned-byte :initarg :prepared-statement-or-portal)
+   (prepared-statement-or-portal-name :type string        :initarg :prepared-statement-or-portal-name)))
+
+(defclass close-message (frontend-message)
+  ((prepared-statement-or-portal      :type unsigned-byte :initarg :prepared-statement-or-portal)
+   (prepared-statement-or-portal-name :type string        :initarg :prepared-statement-or-portal-name)))
+
+(defclass flush-message (frontend-message) ())
 
 ;;;
 ;;; Frontend message sending
@@ -234,6 +244,41 @@
   (write-byte* (char-code #\S))
   (write-int* 32 (message-length sync-message)))
 
+(defmethod message-length ((describe-message describe-message))
+  (with-slots (prepared-statement-or-portal prepared-statement-or-portal-name)
+      describe-message
+    (+ 4
+       1
+       (+ (length prepared-statement-or-portal-name) 1))))
+
+(defmethod send-message ((describe-message describe-message))
+  (with-slots (prepared-statement-or-portal prepared-statement-or-portal-name)
+      (write-byte* (char-code #\D))
+    (write-int* 32 (message-length describe-message))
+    (write-byte* prepared-statement-or-portal)
+    (write-string* prepared-statement-or-portal-name)))
+
+(defmethod message-length ((close-message close-message))
+  (with-slots (prepared-statement-or-portal prepared-statement-or-portal-name)
+      close-message
+    (+ 4
+       1
+       (+ (length prepared-statement-or-portal-name) 1))))
+
+(defmethod send-message ((close-message close-message))
+  (with-slots (prepared-statement-or-portal prepared-statement-or-portal-name)
+      (write-byte* (char-code #\D))
+    (write-int* 32 (message-length close-message))
+    (write-byte* prepared-statement-or-portal)
+    (write-string* prepared-statement-or-portal-name)))
+
+(defmethod message-length ((flush-message flush-message))
+  4)
+
+(defmethod send-message ((flush-message flush-message))
+  (write-byte* (char-code #\H))
+  (write-int* 32 (message-length flush-message)))
+
 ;;;
 ;;; Backend messages
 ;;;
@@ -333,6 +378,14 @@
 (defclass empty-query-response-message (backend-message) ())
 
 (defclass portal-suspended-message (backend-message) ())
+
+(defclass no-data-message (backend-message) ())
+
+(defclass parameter-description-message (backend-message)
+  ((number-of-parameters :type integer :initarg :number-of-parameters)
+   (parameter-data-type-oids :type list :initarg :parameter-data-type-oids)))
+
+(defclass close-complete-message (backend-message) ())
 
 ;;;
 ;;; Backend message parsing
@@ -526,3 +579,42 @@
           ((eql first-byte (char-code #\s))
            (make-instance 'portal-suspended-message))
           (t (error "Unexpected first byte ~a when parsing extended query bind response" first-byte)))))
+
+(defun parse-extended-query-describe-response ()
+  (let ((first-byte (read-byte*))
+        (message-length (read-int* 32)))
+    (declare (ignore message-length))
+    (cond ((eql first-byte (char-code #\T))
+           (let ((number-of-fields-per-row (read-int* 16)))
+             (make-instance 'row-description-message
+                            :number-of-fields-per-row number-of-fields-per-row
+                            :row-descriptions
+                            (loop :for i :from 0 :below number-of-fields-per-row
+                               :collecting (make-instance 'row-description
+                                                          :field-name (read-string*)
+                                                          :table-oid (read-int* 32)
+                                                          :column-attribute-number (read-int* 16)
+                                                          :data-type-oid (read-int* 32)
+                                                          :data-type-size (read-int* 16)
+                                                          :type-modifier (read-int* 32)
+                                                          :format-code (read-int* 16))))))
+          ((eql first-byte (char-code #\n))
+           (make-instance 'no-data-message))
+          ((eql first-byte (char-code #\E))
+           (parse-remaining-error-response-message))
+          ((eql first-byte (char-code #\t))
+           (let ((number-of-parameters (read-int* 16)))
+             (make-instance 'parameter-description-message
+                            :number-of-parameters number-of-parameters
+                            :parameter-data-type-oids
+                            (loop :for i :from 0 :below number-of-parameters
+                               :collecting (read-int* 32))))))))
+
+(defun parse-extended-query-close-response ()
+  (let ((first-byte (read-byte*))
+        (message-length (read-int* 32)))
+    (declare (ignore message-length))
+    (cond ((eql first-byte (char-code #\3))
+           (make-instance 'close-complete-message))
+          ((eql first-byte (char-code #\E))
+           (parse-remaining-error-response-message)))))
