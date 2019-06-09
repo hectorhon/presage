@@ -1,17 +1,22 @@
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (require :sb-md5))
+
+(defvar *pg-stream*)
+
 ;;;
 ;;; Write functions
 ;;;
 
 (defun write-int* (bits value)
   (loop :for pos :downfrom (- bits 8) :to 0 :by 8
-     :do (write-byte (ldb (byte 8 pos) value) *standard-output*)))
+     :do (write-byte (ldb (byte 8 pos) value) *pg-stream*)))
 
 (defun write-string* (str)
-  (write-string str *standard-output*)
-  (write-byte 0 *standard-output*))
+  (write-string str *pg-stream*)
+  (write-byte 0 *pg-stream*))
 
 (defun write-byte* (byte)
-  (write-byte byte *standard-output*))
+  (write-byte byte *pg-stream*))
 
 (defun write-bytes* (bytes)
   (loop :for byte :across bytes
@@ -22,27 +27,35 @@
 ;;;
 
 (defun read-byte* ()
-  (read-byte *standard-input*))
+  (let ((byte (read-byte *pg-stream*)))
+    (format t "byte: ~a~%" byte)
+    byte))
 
 (defun read-bytes* (count)
   (loop :with arr = (make-array count :element-type 'unsigned-byte)
      :for i :from 0 :below count
-     :do (setf (aref arr i) (read-byte*))))
+     :do (setf (aref arr i) (read-byte*))
+     :finally (return arr)))
 
 (defun read-int* (bits)
-  (loop :for shift-count :downfrom (- bits 8) :to 0 :by 8
-     :summing (ash (read-byte *standard-input*) shift-count)))
+  (let ((int (loop :for shift-count :downfrom (- bits 8) :to 0 :by 8
+                :summing (ash (read-byte *pg-stream*) shift-count))))
+    (format t "integer: ~a~%" int)
+    int))
 
 (defun read-ints* (bits count)
   (loop :with arr = (make-array count :element-type 'integer)
      :for i :from 0 :below count
-     :do (setf (aref arr i) (read-int* bits))))
+     :do (setf (aref arr i) (read-int* bits))
+     :finally (return arr)))
 
 (defun read-string* ()
-  (coerce (loop :for c = (read-char)
-             :if (eql #\null c) :return chars
-             :else :collecting c :into chars)
-          'string))
+  (let ((str (coerce (loop :for c = (read-char *pg-stream*)
+                        :if (eql #\null c) :return chars
+                        :else :collecting c :into chars)
+                     'string)))
+    (format t "string: ~a~%" str)
+    str))
 
 ;;;
 ;;; Message
@@ -109,6 +122,9 @@
 (defgeneric message-length (frontend-message))
 
 (defgeneric send-message (frontend-message))
+
+(defmethod send-message :after ((frontend-message frontend-message))
+  (finish-output *pg-stream*))
 
 (defmethod message-length ((startup-message startup-message))
   (with-slots (user database) startup-message
@@ -618,3 +634,84 @@
            (make-instance 'close-complete-message))
           ((eql first-byte (char-code #\E))
            (parse-remaining-error-response-message)))))
+
+;;;
+;;; Interface
+;;;
+
+(defclass connection ()
+  ((process-id :type integer)
+   (secret-key :type integer)
+   (backend-parameters :type list)))
+
+(defun connect (user database &key password gss-or-sspi-handler)
+  (let ((connection (make-instance 'connection)))
+    (send-message (make-instance 'startup-message :user user :database database))
+    (loop :for response = (parse-startup-phase-1-response)
+       :do (ecase (type-of response)
+             (error-response-message
+              (error "The connection attempt has been rejected by the server."))
+             (authentication-ok-message
+              (return))
+             (authentication-cleartext-password-message
+              (send-message (make-instance 'password-message :password password)))
+             (authentication-md5-password-message
+              (labels ((byte-to-hex-string (byte)
+                         (format nil "~X" byte))
+                       (bytes-to-hex-string (bytes)
+                         (apply #'concatenate (cons 'string (map 'list #'byte-to-hex-string bytes))))
+                       (md5-in-hex (str)
+                         (bytes-to-hex-string (sb-md5:md5sum-string str))))
+                (let* ((salt-in-hex
+                        (bytes-to-hex-string (slot-value response 'salt)))
+                       (password
+                        (concatenate 'string "md5"
+                                     (md5-in-hex (concatenate 'string (md5-in-hex (concatenate 'string password user))
+                                                              salt-in-hex)))))
+                  (send-message (make-instance 'password-message :password password)))))
+             (authentication-gss-message
+              (send-message (make-instance 'password-message :password (funcall gss-or-sspi-handler nil))))
+             (authentication-sspi-message
+              (send-message (make-instance 'password-message :password (funcall gss-or-sspi-handler nil))))
+             (authentication-gss-continue-message
+              (let ((more-data (funcall gss-or-sspi-handler (slot-value response 'authentication-data))))
+                (if more-data
+                    (send-message (make-instance 'password-message :password more-data)))))
+             (negotiate-protocol-version-message
+              (#| this message is ignored |#))))
+    (loop :for further-response = (parse-startup-phase-2-response)
+       :do (ecase (type-of further-response)
+             (backend-key-data-message
+              (with-slots (process-id secret-key) further-response
+                (setf (slot-value connection 'process-id) process-id)
+                (setf (slot-value connection 'secret-key) secret-key)))
+             (parameter-status-message
+              (with-slots (parameter-name parameter-value) further-response
+                (push (cons parameter-name parameter-value)
+                      (slot-value connection 'backend-parameters))))
+             (ready-for-query-message
+              (return-from connect connection))
+             (error-response-message
+              (error "Connection start-up failed."))
+             (notice-response-message
+              (with-slots (notice-fields) further-response
+                (let ((severity) (message))
+                  (loop :for notice-field :in notice-fields
+                     :do (with-slots (field-type-byte field-value) notice-field
+                           (cond ((eql field-type-byte (char-code #\S))
+                                  (setf severity field-value))
+                                 ((eql field-type-byte (char-code #\M))
+                                  (setf message field-value)))))
+                  (format t "~a ~a~%" severity message))))))))
+
+(defun test ()
+  (let ((socket (make-instance 'sb-bsd-sockets:local-socket :type :stream)))
+    (setf (sb-bsd-sockets:sockopt-reuse-address socket) t)
+    (unwind-protect
+         (progn (sb-bsd-sockets:socket-connect socket "/var/run/postgresql/.s.PGSQL.5432")
+                (let* ((*pg-stream*
+                        (sb-bsd-sockets:socket-make-stream socket :input t :output t :timeout 5 :element-type :default)))
+                  (connect "presage" "presage" :password "presage")))
+      (sb-bsd-sockets:socket-shutdown socket :direction :io)
+      (sb-bsd-sockets:socket-close socket)
+      (print "socket closed"))))
