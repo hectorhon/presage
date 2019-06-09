@@ -662,10 +662,10 @@
              (authentication-cleartext-password-message
               (send-message (make-instance 'password-message :password password)))
              (authentication-md5-password-message
-              (labels ((byte-to-hex-string (byte)
-                         (format nil "~(~2,'0X~)" byte))
-                       (bytes-to-hex-string (bytes)
-                         (apply #'concatenate 'string (map 'list #'byte-to-hex-string bytes)))
+              (labels ((bytes-to-hex-string (bytes)
+                         (let ((integer (loop :for byte :across bytes :and i :downfrom (1- (length bytes))
+                                           :summing (ash byte (* i 8)))))
+                           (format nil "~(~,2,,'0<~a~>~)" (write-to-string integer :base 16))))
                        (string-to-bytes (str)
                          (map '(vector (unsigned-byte 8)) #'char-code str)))
                 (let* ((salt (slot-value response 'salt))
