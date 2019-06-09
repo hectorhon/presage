@@ -1,6 +1,9 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (require :sb-md5))
 
+(defun log-debug (ctrl-string &rest args)
+  (apply #'format t (concatenate 'string "DEBUG: " ctrl-string) args))
+
 (defvar *pg-stream*)
 
 ;;;
@@ -28,7 +31,7 @@
 
 (defun read-byte* ()
   (let ((byte (read-byte *pg-stream*)))
-    (format t "byte: ~a~%" byte)
+    (log-debug "byte: ~a~%" byte)
     byte))
 
 (defun read-bytes* (count)
@@ -40,7 +43,7 @@
 (defun read-int* (bits)
   (let ((int (loop :for shift-count :downfrom (- bits 8) :to 0 :by 8
                 :summing (ash (read-byte *pg-stream*) shift-count))))
-    (format t "integer: ~a~%" int)
+    (log-debug "integer: ~a~%" int)
     int))
 
 (defun read-ints* (bits count)
@@ -54,7 +57,7 @@
                         :if (eql #\null c) :return chars
                         :else :collecting c :into chars)
                      'string)))
-    (format t "string: ~a~%" str)
+    (log-debug "string: ~a~%" str)
     str))
 
 ;;;
@@ -300,6 +303,9 @@
 ;;;
 
 (defclass backend-message (message) ())
+
+(defmethod initialize-instance :after ((backend-message backend-message) &key)
+  (log-debug "New instance of ~a~%" (type-of backend-message)))
 
 (defclass error-response-message (backend-message)
   ((error-fields :type list :initarg :error-fields)))
@@ -642,7 +648,7 @@
 (defclass connection ()
   ((process-id :type integer)
    (secret-key :type integer)
-   (backend-parameters :type list)))
+   (backend-parameters :type list :initform nil)))
 
 (defun connect (user database &key password gss-or-sspi-handler)
   (let ((connection (make-instance 'connection)))
@@ -657,17 +663,16 @@
               (send-message (make-instance 'password-message :password password)))
              (authentication-md5-password-message
               (labels ((byte-to-hex-string (byte)
-                         (format nil "~X" byte))
+                         (format nil "~(~2,'0X~)" byte))
                        (bytes-to-hex-string (bytes)
-                         (apply #'concatenate (cons 'string (map 'list #'byte-to-hex-string bytes))))
-                       (md5-in-hex (str)
-                         (bytes-to-hex-string (sb-md5:md5sum-string str))))
-                (let* ((salt-in-hex
-                        (bytes-to-hex-string (slot-value response 'salt)))
-                       (password
-                        (concatenate 'string "md5"
-                                     (md5-in-hex (concatenate 'string (md5-in-hex (concatenate 'string password user))
-                                                              salt-in-hex)))))
+                         (apply #'concatenate 'string (map 'list #'byte-to-hex-string bytes)))
+                       (string-to-bytes (str)
+                         (map '(vector (unsigned-byte 8)) #'char-code str)))
+                (let* ((salt (slot-value response 'salt))
+                       (md5-1 (bytes-to-hex-string (sb-md5:md5sum-string (concatenate 'string password user))))
+                       (md5-2 (bytes-to-hex-string (sb-md5:md5sum-sequence
+                                                    (concatenate '(vector (unsigned-byte 8)) (string-to-bytes md5-1) salt))))
+                       (password (concatenate 'string "md5" md5-2)))
                   (send-message (make-instance 'password-message :password password)))))
              (authentication-gss-message
               (send-message (make-instance 'password-message :password (funcall gss-or-sspi-handler nil))))
