@@ -654,11 +654,10 @@
   (let ((connection (make-instance 'connection)))
     (send-message (make-instance 'startup-message :user user :database database))
     (loop :for response = (parse-startup-phase-1-response)
+       :until (eq 'authentication-ok-message (type-of response))
        :do (ecase (type-of response)
              (error-response-message
               (error "The connection attempt has been rejected by the server."))
-             (authentication-ok-message
-              (return))
              (authentication-cleartext-password-message
               (send-message (make-instance 'password-message :password password)))
              (authentication-md5-password-message
@@ -685,6 +684,8 @@
              (negotiate-protocol-version-message
               (#| this message is ignored |#))))
     (loop :for further-response = (parse-startup-phase-2-response)
+       :until (eq 'ready-for-query-message (type-of further-response))
+       :finally (return connection)
        :do (ecase (type-of further-response)
              (backend-key-data-message
               (with-slots (process-id secret-key) further-response
@@ -694,8 +695,6 @@
               (with-slots (parameter-name parameter-value) further-response
                 (push (cons parameter-name parameter-value)
                       (slot-value connection 'backend-parameters))))
-             (ready-for-query-message
-              (return-from connect connection))
              (error-response-message
               (error "Connection start-up failed."))
              (notice-response-message
