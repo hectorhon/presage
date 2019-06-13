@@ -394,8 +394,8 @@
    (column-values           :type list    :initarg :column-values)))
 
 (defclass data-row ()
-  ((column-value-length :type integer       :initarg :column-value-length)
-   (column-value        :type unsigned-byte :initarg :column-value)))
+  ((column-value-length :type integer                :initarg :column-value-length)
+   (column-value        :type (vector unsigned-byte) :initarg :column-value)))
 
 (defclass empty-query-response-message (backend-message) ())
 
