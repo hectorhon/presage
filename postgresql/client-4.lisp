@@ -378,10 +378,10 @@
 
 (defclass row-description-message (backend-message)
   ((number-of-fields-per-row :type integer :initarg :number-of-fields-per-row)
-   (field-descriptions       :type list    :initarg :field-descriptions)))
+   (field-descriptions       :type list    :initarg :field-descriptions       :reader field-descriptions)))
 
 (defclass field-description ()
-  ((field-name              :type string  :initarg :field-name)
+  ((field-name              :type string  :initarg :field-name              :reader field-name)
    (table-oid               :type integer :initarg :table-oid)
    (column-attribute-number :type integer :initarg :column-attribute-number)
    (data-type-oid           :type integer :initarg :data-type-oid)
@@ -708,6 +708,52 @@
                                   (setf message field-value)))))
                   (format t "~a ~a~%" severity message))))))))
 
+(defun convert-data-row (row-description-message data-row-message)
+  "Given a row description message, convert the received data row message into a list of
+   field values."
+  ;; Can probably be improved by creating a row reader from the row description message
+  (loop :for (field-description column-value)
+     :in (mapcar #'list
+                 (field-descriptions row-description-message)
+                 (slot-value data-row-message 'column-values))
+     :collect (with-slots (data-type-oid format-code) field-description
+                (with-slots (column-value-value) column-value
+                  (if (eql 0 format-code)
+                      (let ((value (concatenate 'string (map 'vector #'code-char column-value-value))))
+                        (ecase data-type-oid
+                          (705 (#| unknown data type, treat as string |#)
+                               value)
+                          (23  (#| int4 data type |#)
+                               (parse-integer value))))
+                      (error "Binary format not yet implemented"))))))
+
+(defun simple-query (query-string)
+  "Execute the query on *pg-stream* and return a list of lists. The first item in the
+   list is the list of column names, the subsequent items are data rows."
+  (send-message (make-instance 'query-message :query-string query-string))
+  (loop :for response = (parse-simple-query-response)
+     :with row-description-message = nil ; to be filled from response
+     :and rows = nil                     ; to be filled from response
+     :until (eq 'ready-for-query-message (type-of response))
+     :finally (return (cons (mapcar #'field-name (field-descriptions row-description-message)) rows))
+     :do (ecase (type-of response)
+           (command-complete-message
+            ())
+           (copy-in-response
+            (error "Not yet implemented"))
+           (copy-out-response
+            (error "Not yet implemented"))
+           (row-description-message
+            (setf row-description-message response))
+           (data-row-message
+            (push (convert-data-row row-description-message response) rows))
+           (empty-query-response-message
+            (return rows))
+           (error-response-message
+            (error "Error: ~a" response))
+           (notice-response-message
+            (format t "Notice: ~a" response)))))
+
 (defun test ()
   (let ((socket (make-instance 'sb-bsd-sockets:local-socket :type :stream)))
     (setf (sb-bsd-sockets:sockopt-reuse-address socket) t)
@@ -715,7 +761,8 @@
          (progn (sb-bsd-sockets:socket-connect socket "/var/run/postgresql/.s.PGSQL.5432")
                 (let* ((*pg-stream*
                         (sb-bsd-sockets:socket-make-stream socket :input t :output t :timeout 5 :element-type :default)))
-                  (connect "presage" "presage" :password "presage")))
+                  (connect "presage" "presage" :password "presage")
+                  (simple-query "select 'asdf' as my_string, 1234567 as my_number")))
       (sb-bsd-sockets:socket-shutdown socket :direction :io)
       (sb-bsd-sockets:socket-close socket)
       (print "socket closed"))))
