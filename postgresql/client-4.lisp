@@ -378,9 +378,9 @@
 
 (defclass row-description-message (backend-message)
   ((number-of-fields-per-row :type integer :initarg :number-of-fields-per-row)
-   (row-descriptions         :type list    :initarg :row-descriptions)))
+   (field-descriptions       :type list    :initarg :field-descriptions)))
 
-(defclass row-description ()
+(defclass field-description ()
   ((field-name              :type string  :initarg :field-name)
    (table-oid               :type integer :initarg :table-oid)
    (column-attribute-number :type integer :initarg :column-attribute-number)
@@ -507,9 +507,9 @@
            (let ((number-of-fields-per-row (read-int* 16)))
              (make-instance 'row-description-message
                             :number-of-fields-per-row number-of-fields-per-row
-                            :row-descriptions
+                            :field-descriptions
                             (loop :for i :from 0 :below number-of-fields-per-row
-                               :collecting (make-instance 'row-description
+                               :collecting (make-instance 'field-description
                                                           :field-name (read-string*)
                                                           :table-oid (read-int* 32)
                                                           :column-attribute-number (read-int* 16)
@@ -610,9 +610,9 @@
            (let ((number-of-fields-per-row (read-int* 16)))
              (make-instance 'row-description-message
                             :number-of-fields-per-row number-of-fields-per-row
-                            :row-descriptions
+                            :field-descriptions
                             (loop :for i :from 0 :below number-of-fields-per-row
-                               :collecting (make-instance 'row-description
+                               :collecting (make-instance 'field-description
                                                           :field-name (read-string*)
                                                           :table-oid (read-int* 32)
                                                           :column-attribute-number (read-int* 16)
