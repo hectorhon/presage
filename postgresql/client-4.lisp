@@ -393,9 +393,9 @@
   ((number-of-column-values :type integer :initarg :number-of-column-values)
    (column-values           :type list    :initarg :column-values)))
 
-(defclass data-row ()
+(defclass column-value ()
   ((column-value-length :type integer                :initarg :column-value-length)
-   (column-value        :type (vector unsigned-byte) :initarg :column-value)))
+   (column-value-value  :type (vector unsigned-byte) :initarg :column-value-value)))
 
 (defclass empty-query-response-message (backend-message) ())
 
@@ -525,9 +525,9 @@
                             (loop :for i :from 0 :below number-of-column-values
                                :collecting (let* ((column-value-length (read-int* 32))
                                                   (column-value (read-bytes* column-value-length)))
-                                             (make-instance 'data-row
+                                             (make-instance 'column-value
                                                             :column-value-length column-value-length
-                                                            :column-value column-value))))))
+                                                            :column-value-value column-value))))))
           ((eql first-byte (char-code #\I))
            (make-instance 'empty-query-response-message))
           ((eql first-byte (char-code #\E))
@@ -589,9 +589,9 @@
                             (loop :for i :from 0 :below number-of-column-values
                                :collecting (let* ((column-value-length (read-int* 32))
                                                   (column-value (read-bytes* column-value-length)))
-                                             (make-instance 'data-row
+                                             (make-instance 'column-value
                                                             :column-value-length column-value-length
-                                                            :column-value column-value))))))
+                                                            :column-value-value column-value))))))
           ((eql first-byte (char-code #\I))
            (make-instance 'empty-query-response-message))
           ((eql first-byte (char-code #\E))
