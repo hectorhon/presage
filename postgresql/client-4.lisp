@@ -721,10 +721,12 @@
                   (if (eql 0 format-code)
                       (let ((value (concatenate 'string (map 'vector #'code-char column-value-value))))
                         (ecase data-type-oid
-                          (705 (#| unknown data type, treat as string |#)
-                               value)
-                          (23  (#| int4 data type |#)
-                               (parse-integer value))))
+                          (705          ; unknown data type, treat as string
+                           value)
+                          (1043         ; varchar
+                           value)
+                          (23           ; int4
+                           (parse-integer value))))
                       (error "Binary format not yet implemented"))))))
 
 (defun simple-query (query-string)
@@ -762,7 +764,7 @@
                 (let* ((*pg-stream*
                         (sb-bsd-sockets:socket-make-stream socket :input t :output t :timeout 5 :element-type :default)))
                   (connect "presage" "presage" :password "presage")
-                  (simple-query "select 'asdf' as my_string, 1234567 as my_number")))
+                  (simple-query "select * from persons")))
       (sb-bsd-sockets:socket-shutdown socket :direction :io)
       (sb-bsd-sockets:socket-close socket)
       (print "socket closed"))))
