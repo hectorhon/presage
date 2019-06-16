@@ -1,4 +1,20 @@
-(in-package :com.hon.string-utils)
+(in-package :com.hon.utils.string)
+
+(defun replace-all (string part replacement &key (test #'char=))
+  "Returns a new string in which all the occurences of the part
+   is replaced with replacement.
+   https://lispcookbook.github.io/cl-cookbook/strings.html"
+  (with-output-to-string (out)
+    (loop :with part-length = (length part)
+       :for old-pos = 0 :then (+ pos part-length)
+       :for pos = (search part string
+                          :start2 old-pos
+                          :test test)
+       :do (write-string string out
+                         :start old-pos
+                         :end (or pos (length string)))
+       :when pos :do (write-string replacement out)
+       :while pos)))
 
 (defun whitespace-char-p (c)
   "Tests if a character is a whitespace."
