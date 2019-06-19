@@ -127,6 +127,11 @@
                  :parameter-value-length (/ 32 8)
                  :parameter-value (integer-to-bytes integer 32)))
 
+(defmethod to-pg-parameter-value ((string string))
+  (make-instance 'parameter-value
+                 :parameter-value-length (length string)
+                 :parameter-value (map 'vector #'char-code string)))
+
 (defun query (query-string &rest parameters)
   "Perform a query with parameters."
   (send-message (make-instance 'parse-message
@@ -157,40 +162,40 @@
                                :prepared-statement-or-portal (char-code #\P)
                                :prepared-statement-or-portal-name ""))
   (send-message (make-instance 'flush-message))
-  (let ((row-description-message (let ((response (parse-extended-query-describe-response)))
-                                   (ecase (type-of response)
-                                     (row-description-message response)
-                                     (no-data-message nil)
-                                     (error-response-message
-                                      (error "Error: ~a" response))
-                                     (notice-response-message
-                                      (log-debug "Notice: ~a" response))))))
-    (send-message (make-instance 'execute-message
-                                 :portal-name ""
-                                 :max-number-of-rows-to-return 0))
-    (send-message (make-instance 'flush-message))
-    (loop :for response = (parse-extended-query-execute-response)
-       :with rows = nil                 ; to be filled from response
-       :until (eq 'command-complete-message (type-of response))
-       :finally (progn (log-debug "rows: ~a" rows)
-                       (return (cons (mapcar #'field-name (field-descriptions row-description-message)) rows)))
-       :do (ecase (type-of response)
-             (copy-in-response
-              (error "Not yet implemented"))
-             (copy-out-response
-              (error "Not yet implemented"))
-             (data-row-message
-              (let ((x (convert-data-row row-description-message response)))
-                (log-debug "x: ~a" x)
-                (push x rows)))
-             (empty-query-response-message
-              (return rows))
-             (error-response-message
-              (error "Error: ~a" response))
-             (notice-response-message
-              (log-debug "Notice: ~a" response))
-             (portal-suspended-message
-              (error "Not yet implemented"))))))
+  (prog1 (let ((row-description-message (let ((response (parse-extended-query-describe-response)))
+                                          (ecase (type-of response)
+                                            (row-description-message response)
+                                            (no-data-message nil)
+                                            (error-response-message
+                                             (error "Error: ~a" response))
+                                            (notice-response-message
+                                             (log-debug "Notice: ~a" response))))))
+           (send-message (make-instance 'execute-message
+                                        :portal-name ""
+                                        :max-number-of-rows-to-return 0))
+           (send-message (make-instance 'flush-message))
+           (loop :for response = (parse-extended-query-execute-response)
+              :with rows = nil                 ; to be filled from response
+              :until (eq 'command-complete-message (type-of response))
+              :finally (return (cons (mapcar #'field-name (field-descriptions row-description-message)) rows))
+              :do (ecase (type-of response)
+                    (copy-in-response
+                     (error "Not yet implemented"))
+                    (copy-out-response
+                     (error "Not yet implemented"))
+                    (data-row-message
+                     (let ((x (convert-data-row row-description-message response)))
+                       (push x rows)))
+                    (empty-query-response-message
+                     (return rows))
+                    (error-response-message
+                     (error "Error: ~a" response))
+                    (notice-response-message
+                     (log-debug "Notice: ~a" response))
+                    (portal-suspended-message
+                     (error "Not yet implemented")))))
+    (send-message (make-instance 'sync-message))
+    (parse-extended-query-sync-response)))
 
 (defun test ()
   (let ((socket (make-instance 'sb-bsd-sockets:local-socket :type :stream)))
@@ -203,8 +208,7 @@
                        (*standard-output* pg-stream))
                   (connect "presage" "presage" :password "presage")
                   (simple-query "select * from persons")
-                  (query "select 1")))
-                  ;; (query "select * from persons where age = $1 and name = $2;" 10 "james")))
+                  (query "select * from persons where age = $1 and name = $2;" 10 "james")))
       (sb-bsd-sockets:socket-shutdown socket :direction :io)
       (sb-bsd-sockets:socket-close socket)
       (print "socket closed"))))
