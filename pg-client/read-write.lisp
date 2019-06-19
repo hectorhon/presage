@@ -24,14 +24,18 @@
           'string))
 
 (defun write-byte* (byte)
+  (log-debug "write byte (1): ~a" byte)
   (write-byte byte *standard-output*))
 
 (defun write-bytes* (bytes)
+  (log-debug "write bytes (~d): ~a" (length bytes) bytes)
   (write-sequence bytes *standard-output*))
 
 (defun write-int* (bits integer)
+  (log-debug "write int~a (~d): ~a" bits (/ bits 8) integer)
   (write-sequence (integer-to-bytes integer bits) *standard-output*))
 
 (defun write-string* (string)
+  (log-debug "write string (~d): ~a" (length string) string)
   (write-string string)
   (write-byte* 0))

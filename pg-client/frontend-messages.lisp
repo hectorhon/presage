@@ -7,7 +7,8 @@
 (defgeneric send-message (frontend-message))
 
 (defmethod send-message :after ((frontend-message frontend-message))
-  (finish-output))
+  (finish-output)
+  (log-debug "Sent message ~a" (type-of frontend-message)))
 
 ;;;
 ;;; StartupMessage
@@ -21,10 +22,10 @@
   (with-slots (user database) startup-message
     (+ 4
        4
-       (+ (length "user")     1)
-       (+ (length user)       1)
-       (+ (length "database") 1)
-       (+ (length database)   1)
+       (1+ (length "user"))
+       (1+ (length user))
+       (1+ (length "database"))
+       (1+ (length database))
        1)))
 
 (defmethod send-message ((startup-message startup-message))
@@ -47,7 +48,7 @@
 (defmethod message-length ((password-message password-message))
   (with-slots (password) password-message
     (+ 4
-       (+ (length password) 1))))
+       (1+ (length password)))))
 
 (defmethod send-message ((password-message password-message))
   (with-slots (password) password-message
@@ -65,7 +66,7 @@
 (defmethod message-length ((query-message query-message))
   (with-slots (query-string) query-message
     (+ 4
-       (+ (length query-string) 1))))
+       (1+ (length query-string)))))
 
 (defmethod send-message ((query-message query-message))
   (with-slots (query-string) query-message
@@ -90,8 +91,8 @@
                parameter-data-type-oids)
       parse-message
     (+ 4
-       (+ (length destination-prepared-statement-name) 1)
-       (+ (length query-string)                        1)
+       (1+ (length destination-prepared-statement-name))
+       (1+ (length query-string))
        2
        (* (length parameter-data-type-oids) 4))))
 
@@ -138,8 +139,8 @@
                result-column-format-codes)
       bind-message
     (+ 4
-       (+ (length destination-portal-name)        1)
-       (+ (length source-prepared-statement-name) 1)
+       (1+ (length destination-portal-name))
+       (1+ (length source-prepared-statement-name))
        2
        (* (length parameter-format-codes) 2)
        2
@@ -160,8 +161,8 @@
       bind-message
     (write-byte* (char-code #\B))
     (write-int* 32 (message-length bind-message))
-    (write-string destination-portal-name)
-    (write-string source-prepared-statement-name)
+    (write-string* destination-portal-name)
+    (write-string* source-prepared-statement-name)
     (write-int* 16 number-of-parameter-format-codes)
     (loop :for parameter-format-code :in parameter-format-codes
        :do (write-int* 16 parameter-format-code))
@@ -224,7 +225,8 @@
 
 (defmethod send-message ((describe-message describe-message))
   (with-slots (prepared-statement-or-portal prepared-statement-or-portal-name)
-      (write-byte* (char-code #\D))
+      describe-message
+    (write-byte* (char-code #\D))
     (write-int* 32 (message-length describe-message))
     (write-byte* prepared-statement-or-portal)
     (write-string* prepared-statement-or-portal-name)))

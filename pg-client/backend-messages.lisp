@@ -64,6 +64,10 @@
 (defclass command-complete-message (backend-message)
   ((command-tag :type string :initarg :command-tag)))
 
+(defclass parse-complete-message (backend-message) ())
+
+(defclass bind-complete-message (backend-message) ())
+
 (defclass copy-in-response-message (backend-message)
   ((copy-format         :type integer :initarg :copy-format)
    (number-of-columns   :type integer :initarg :number-of-columns)
@@ -237,6 +241,15 @@
            (parse-remaining-notice-response-message))
           (t (error "Unexpected first byte ~a when parsing simple query response" first-byte)))))
 
+(defun parse-extended-query-sync-response ()
+  (let ((first-byte (read-byte*))
+        (message-length (read-int* 32)))
+    (declare (ignore message-length))
+    (cond ((eql first-byte (char-code #\Z))
+           (make-instance 'ready-for-query-message
+                          :backend-transaction-status-indicator (read-byte*)))
+          (t (error "Unexpected first byte ~a when parsing extended query sync response" first-byte)))))
+
 (defun parse-extended-query-parse-response ()
   (let ((first-byte (read-byte*))
         (message-length (read-int* 32)))
@@ -298,7 +311,7 @@
            (parse-remaining-notice-response-message))
           ((eql first-byte (char-code #\s))
            (make-instance 'portal-suspended-message))
-          (t (error "Unexpected first byte ~a when parsing extended query bind response" first-byte)))))
+          (t (error "Unexpected first byte ~a when parsing extended query execute response" first-byte)))))
 
 (defun parse-extended-query-describe-response ()
   (let ((first-byte (read-byte*))
