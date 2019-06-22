@@ -1,13 +1,7 @@
-(defparameter *context* nil)
-
-(setf *context* (acons 'users (list "user 1"
-                                    "user 2")
-                       *context*))
-
 (defparameter *template*
   (quote (ul ((class "sitemap")
               (id "asdf"))
-             (:for user :in users
+             (:for user :in *users*
                    (li ()
                        (a ((href "/link")) (:eval user)))))))
 
@@ -21,11 +15,11 @@
           ((eq tag-name :for)
            (destructuring-bind (for-keyword variable-name in-keyword collection-name inner-sexpr) sexpr
              (declare (ignore for-keyword in-keyword))
-             (loop :with items = (cdr (assoc collection-name *context*))
+             (loop :with items = (symbol-value collection-name)
                 :with items-count = (length items)
                 :for item :in items
                 :for item-counter :upfrom 1
-                :do (let ((*context* (pairlis (list variable-name) (list item))))
+                :do (progv (list variable-name) (list item)
                       (render inner-sexpr))
                 :unless (eql items-count item-counter) ; add newline, except for last item
                 :do (format t "~%"))))
@@ -39,11 +33,17 @@
              (cond ((typep contents 'list)
                     (let ((*indent* (concatenate 'string *indent* "  ")))
                       (format t "~%")
+                      (if (eq :eval (car contents)) (format t "~a" *indent*))
                       (render contents)
                       (format t "~%"))
                     (format t "~a" *indent*)) ; indent for closing tag
                    ((typep contents 'symbol)
-                    (format t "~a" (cdr (assoc contents *context*))))
+                    (format t "~a" (symbol-value contents)))
                    (t
                     (format t "~a" contents)))
              (format t "</~(~a~)>" tag-name))))))
+
+(defun test ()
+  (let ((*users* (list "user 9" "user 10")))
+    (declare (special *users*))
+    (render *template*)))
