@@ -1,4 +1,4 @@
-(defpackage :com.hon.http
+(defpackage :com.hon.http.server
   (:use :common-lisp
         :sb-bsd-sockets
         :com.hon.utils.test

@@ -1,4 +1,4 @@
-(in-package :com.hon.http)
+(in-package :com.hon.http.server)
 
 (defparameter *http-response*
   "HTTP/1.1 200 OK

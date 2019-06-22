@@ -1,9 +1,7 @@
 (asdf:defsystem "presage"
   :depends-on ("presage/utilities")
   :serial t
-  :components ((:file "packages")
-               (:file "http/parser")
-               (:file "http/server")))
+  :components ())
 
 (asdf:defsystem "presage/utilities"
   :serial t
@@ -24,3 +22,11 @@
                (:file "frontend-messages")
                (:file "backend-messages")
                (:file "interface")))
+
+(asdf:defsystem "presage/http-server"
+  :depends-on ("presage/utilities")
+  :serial t
+  :pathname "http"
+  :components ((:file "packages")
+               (:file "parser")
+               (:file "server")))

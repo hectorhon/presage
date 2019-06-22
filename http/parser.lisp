@@ -1,4 +1,4 @@
-(in-package :com.hon.http)
+(in-package :com.hon.http.server)
 
 (defclass http-request ()
   ((request-method :type string
@@ -47,7 +47,7 @@ mno pqr")
             (:parsing-first-line
              (let ((line (read-line-with-crlf input-stream)))
                (destructuring-bind (request-method* target* protocol*)
-                   (com.hon.utils.string:split-string line " ")
+                   (split-string line " ")
                  (declare (ignore protocol*))
                  (with-slots (request-method target) parsed-request
                    (setf request-method request-method*)
@@ -64,7 +64,7 @@ mno pqr")
                             (setf state :parsing-body))
                            (t (return parsed-request)))
                      (destructuring-bind (header-name header-value)
-                         (com.hon.utils.string:split-string line ":" 1)
+                         (split-string line ":" 1)
                        (setf (headers parsed-request)
                              (acons (string-trim " " header-name)
                                     (string-trim " " header-value)

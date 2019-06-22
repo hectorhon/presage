@@ -14,8 +14,8 @@
                                    :do (progn (format t "Failed. Expected ~a but got ~a instead (index ~d).~%"
                                                       expected actual i)
                                               (error "Expected ~a but got ~a instead (index ~d)."
-                                                     expected actual i)))
-                                (format t "OK.~%")))
+                                                     expected actual i))
+                                   :finally (format t "OK.~%"))))
                            ((equal expected actual)
                             (format t " OK.~%"))
                            (t
