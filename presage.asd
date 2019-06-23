@@ -12,6 +12,12 @@
                (:file "logging")
                (:file "byte-utils")))
 
+(asdf:defsystem "presage/templating"
+  :serial t
+  :pathname "templating"
+  :components ((:file "packages")
+               (:file "html")))
+
 (asdf:defsystem "presage/pg-client"
   :depends-on ("presage/utilities")
   :serial t
