@@ -1,15 +1,27 @@
-(defparameter *template*
-  (quote (ul ((class "sitemap")
-              (id "asdf"))
-             (:for user :in *users*
-                   (li ()
-                       (a ((href "/link")) (:eval user)))))))
-
 (defparameter *indent* "")
+
+(defparameter *templates* nil)
+
+(defvar *blocks* nil
+  "An alist of block-name to block-contents.")
 
 (defun render (sexpr)
   (let ((tag-name (car sexpr)))
-    (cond ((eq tag-name :eval)
+    (cond ((eq tag-name :extends)
+           (let* ((parent-template-name (second sexpr))
+                  (parent-template (cdr (assoc parent-template-name *templates*)))
+                  (*blocks* (mapcar (lambda (block-sexpr)
+                                      (destructuring-bind (block-keyword block-name &rest block-contents) block-sexpr
+                                        (declare (ignore block-keyword))
+                                        (cons block-name block-contents)))
+                                    (cddr sexpr))))
+             (render parent-template)))
+          ((eq tag-name :block)
+           (let* ((block-name (second sexpr))
+                  (child-sexprs (cdr (assoc block-name *blocks*))))
+             (loop :for child-sexpr :in child-sexprs
+                :do (render child-sexpr))))
+          ((eq tag-name :eval)
            (let ((eval-result (eval (second sexpr))))
              (format t "~a" eval-result)))
           ((eq tag-name :for)
@@ -24,24 +36,40 @@
                 :unless (eql items-count item-counter) ; add newline, except for last item
                 :do (format t "~%"))))
           (t
-           (destructuring-bind (attributes contents) (cdr sexpr)
-             (format t "~a" *indent*)
-             (loop :initially (format t "<~(~a~)" tag-name)
+           (destructuring-bind (attributes &rest contents) (cdr sexpr)
+             (loop :initially (format t "~a<~(~a~)" *indent* tag-name)
                 :for (name value) :in attributes
                 :do (format t " ~(~a~)=\"~a\"" name value)
-                :finally (format t ">"))
-             (cond ((typep contents 'list)
-                    (let ((*indent* (concatenate 'string *indent* "  ")))
-                      (format t "~%")
-                      (if (eq :eval (car contents)) (format t "~a" *indent*))
-                      (render contents)
-                      (format t "~%"))
-                    (format t "~a" *indent*)) ; indent for closing tag
-                   ((typep contents 'symbol)
-                    (format t "~a" (symbol-value contents)))
-                   (t
-                    (format t "~a" contents)))
-             (format t "</~(~a~)>" tag-name))))))
+                :finally (format t ">~%"))
+             (let ((*indent* (concatenate 'string *indent* "  ")))
+               (loop :for content :in contents
+                  :do (cond ((typep content 'list)
+                             (if (eq :eval (car content)) (format t "~a" *indent*))
+                             (render content))
+                            ((typep content 'symbol)
+                             (format t "~a~a" *indent* (symbol-value content)))
+                            (t
+                             (format t "~a~a" *indent* content)))
+                  :do (format t "~%")))
+             (format t "~a</~(~a~)>" *indent* tag-name))))))
+
+(defparameter *template*
+  '(:extends "layout.l"
+    (:block content
+      (ul ((class "sitemap")
+           (id "asdf"))
+          (div ((class "xxx")) "yyy")
+          "zzz"
+          (:for user :in *users*
+                (li ()
+                    (span () "here is ")
+                    (a ((href "/link")) (:eval user))))))))
+
+(defparameter *layout*
+  '(body ()
+    (:block content)))
+
+(setf *templates* (acons "layout.l" *layout* *templates*))
 
 (defun test ()
   (let ((*users* (list "user 9" "user 10")))
