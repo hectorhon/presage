@@ -1,17 +1,27 @@
 (in-package :com.hon.templating.html)
 
-(defparameter *indent* "")
+(defparameter *base-directory*
+  (make-pathname :directory '(:relative "templating"))
+  "The base directory containing the templates." )
 
-(defparameter *templates* nil)
+(defparameter *templates*
+  (make-hash-table :test 'equal))
+
+(defun read-template (filename)
+  "Read file contents as sexpr."
+  (with-open-file (stream (merge-pathnames filename *base-directory*))
+    (setf (gethash filename *templates*) (read stream))))
 
 (defvar *blocks* nil
   "An alist of block-name to block-contents.")
+
+(defparameter *indent* "")
 
 (defun render (sexpr)
   (let ((tag-name (car sexpr)))
     (cond ((eq tag-name :extends)
            (let* ((parent-template-name (second sexpr))
-                  (parent-template (cdr (assoc parent-template-name *templates*)))
+                  (parent-template (read-template parent-template-name))
                   (*blocks* (mapcar (lambda (block-sexpr)
                                       (destructuring-bind (block-keyword block-name &rest block-contents) block-sexpr
                                         (declare (ignore block-keyword))
@@ -55,25 +65,7 @@
                   :do (format t "~%")))
              (format t "~a</~(~a~)>" *indent* tag-name))))))
 
-(defparameter *template*
-  '(:extends "layout.l"
-    (:block content
-      (ul ((class "sitemap")
-           (id "asdf"))
-          (div ((class "xxx")) "yyy")
-          "zzz"
-          (:for user :in *users*
-                (li ()
-                    (span () "here is ")
-                    (a ((href "/link")) (:eval user))))))))
-
-(defparameter *layout*
-  '(body ()
-    (:block content)))
-
-(setf *templates* (acons "layout.l" *layout* *templates*))
-
 (defun test ()
   (let ((*users* (list "user 9" "user 10")))
     (declare (special *users*))
-    (render *template*)))
+    (render (read-template "page1.l"))))
