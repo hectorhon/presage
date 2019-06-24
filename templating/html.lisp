@@ -17,6 +17,24 @@
 
 (defparameter *indent* "")
 
+(defun escape-html (string &optional (attribute-p t))
+  (with-output-to-string (out)
+    (if attribute-p
+        (loop :for char :across string
+           :do (case char
+                 (#\& (write-string "&amp;" out))
+                 (#\< (write-string "&lt;" out))
+                 (#\> (write-string "&gt;" out))
+                 (#\" (write-string "&quot;" out))
+                 (#\' (write-string "&#39;" out))
+                 (t (write-char char out))))
+        (loop :for char :across string
+           :do (case char
+                 (#\& (write-string "&amp;" out))
+                 (#\< (write-string "&lt;" out))
+                 (#\> (write-string "&gt;" out))
+                 (t (write-char char out)))))))
+
 (defun render (sexpr)
   (let ((tag-name (car sexpr)))
     (cond ((eq tag-name :extends)
@@ -51,7 +69,10 @@
            (destructuring-bind (attributes &rest contents) (cdr sexpr)
              (loop :initially (format t "~a<~(~a~)" *indent* tag-name)
                 :for (name value) :in attributes
-                :do (format t " ~(~a~)=\"~a\"" name value)
+                :do (if (and (typep value 'list)
+                             (eq :eval (first value)))
+                        (format t " ~(~a~)=\"~a\"" name (escape-html (eval (second value))))
+                        (format t " ~(~a~)=\"~a\"" name (escape-html value)))
                 :finally (format t ">~%"))
              (let ((*indent* (concatenate 'string *indent* "  ")))
                (loop :for content :in contents
@@ -59,9 +80,13 @@
                              (if (eq :eval (car content)) (format t "~a" *indent*))
                              (render content))
                             ((typep content 'symbol)
-                             (format t "~a~a" *indent* (symbol-value content)))
+                             (format t "~a~a"
+                                     *indent*
+                                     (escape-html (format nil "~a" (symbol-value content)))))
                             (t
-                             (format t "~a~a" *indent* content)))
+                             (format t "~a~a"
+                                     *indent*
+                                     (escape-html (format nil "~a" content)))))
                   :do (format t "~%")))
              (format t "~a</~(~a~)>" *indent* tag-name))))))
 
