@@ -1,17 +1,5 @@
 (in-package :com.hon.templating.html)
 
-(defparameter *base-directory*
-  (make-pathname :directory '(:relative "templating"))
-  "The base directory containing the templates." )
-
-(defparameter *templates*
-  (make-hash-table :test 'equal))
-
-(defun read-template (filename)
-  "Read file contents as sexpr."
-  (with-open-file (stream (merge-pathnames filename *base-directory*))
-    (setf (gethash filename *templates*) (read stream))))
-
 (defvar *blocks* nil
   "An alist of block-name to block-contents.")
 
@@ -90,7 +78,39 @@
                   :do (format t "~%")))
              (format t "~a</~(~a~)>" *indent* tag-name))))))
 
+
+(defparameter *base-directory*
+  (make-pathname :directory '(:relative "templating"))
+  "The base directory containing the templates." )
+
+(defparameter *templates*
+  (make-hash-table :test 'equal))
+
+(defvar *calling-package* nil
+  "Special variable to store the package that read-template should READ into.")
+
+(defun read-template (filename)
+  "Read file contents as sexpr. The contents will be read into package
+   *calling-package*."
+  ;; We read into *calling-package* instead of taking a function argument such as
+  ;; destination-package because the render function uses this function too.
+  (with-open-file (stream (merge-pathnames filename *base-directory*))
+    (let ((symbols (let ((original-package *package*))
+                     ;; If *package* is not set correctly, symbol-value in render will
+                     ;; not work because the symbols would be read into the active
+                     ;; package (such as cl-user) instead of the package of the function
+                     ;; calling render-template (which declares special lexical
+                     ;; variables as a way to pass the context).
+                     (prog2 (setf *package* *calling-package*)
+                         (read stream)
+                       (setf *package* original-package)))))
+      (setf (gethash filename *templates*) symbols))))
+
+(defmacro render-template (file-name)
+  `(let ((*calling-package* ,*package*))
+     (render (read-template ,file-name))))
+
 (defun test ()
   (let ((*users* (list "user 9" "user 10")))
     (declare (special *users*))
-    (render (read-template "page1.l"))))
+    (render-template "page1.l")))
