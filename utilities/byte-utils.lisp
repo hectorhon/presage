@@ -20,3 +20,12 @@
 (check-equals "bytes-to-integer"
               65792
               (bytes-to-integer #(0 0 1 1 0)))
+
+(defun bytes-to-hex-string (bytes)
+  (with-output-to-string (stream)
+    (loop :for byte :across bytes
+       :do (format stream "~2,'0x" byte))))
+
+(check-equals "bytes-to-hex-string"
+              "1234ABCD"
+              (bytes-to-hex-string #(#x12 #x34 #xab #xcd)))

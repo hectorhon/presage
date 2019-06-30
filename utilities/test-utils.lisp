@@ -15,7 +15,8 @@
                                                       expected actual i)
                                               (error "Expected ~a but got ~a instead (index ~d)."
                                                      expected actual i))
-                                   :finally (format t "OK.~%"))))
+                                   :finally (format t "OK.~%"))
+                                (error "Expected length of ~d, but got ~d instead.~%" (length expected) (length actual))))
                            ((equal expected actual)
                             (format t " OK.~%"))
                            (t

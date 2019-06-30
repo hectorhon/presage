@@ -12,10 +12,26 @@
 (defpackage :com.hon.utils.logging
   (:use :common-lisp
         :com.hon.utils.string)
-  (:export log-debug))
+  (:export set-package-log-level
+           log-debug))
 
 (defpackage :com.hon.utils.byte
   (:use :common-lisp
         :com.hon.utils.test)
   (:export integer-to-bytes
-           bytes-to-integer))
+           bytes-to-integer
+           bytes-to-hex-string))
+
+(defpackage :com.hon.utils.crypto.sha256
+  (:use :common-lisp
+        :com.hon.utils.logging
+        :com.hon.utils.test
+        :com.hon.utils.byte)
+  (:export compute-hash))
+
+(defpackage :com.hon.utils.crypto.hmac
+  (:use :common-lisp
+        :com.hon.utils.logging
+        :com.hon.utils.test
+        :com.hon.utils.byte)
+  (:export compute-hmac-sha256))

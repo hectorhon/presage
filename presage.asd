@@ -10,7 +10,11 @@
                (:file "test-utils")
                (:file "string-utils")
                (:file "logging")
-               (:file "byte-utils")))
+               (:file "byte-utils")
+               (:module "crypto"
+                        :serial t
+                        :components ((:file "sha256")
+                                     (:file "hmac")))))
 
 (asdf:defsystem "presage/pg-client"
   :depends-on ("presage/utilities")
