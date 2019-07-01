@@ -14,7 +14,8 @@
                (:module "crypto"
                         :serial t
                         :components ((:file "sha256")
-                                     (:file "hmac")))))
+                                     (:file "hmac")
+                                     (:file "pbkdf2")))))
 
 (asdf:defsystem "presage/pg-client"
   :depends-on ("presage/utilities")

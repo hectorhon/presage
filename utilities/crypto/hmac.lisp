@@ -1,3 +1,5 @@
+;;;; https://tools.ietf.org/html/rfc2104
+
 (in-package :com.hon.utils.crypto.hmac)
 
 (set-package-log-level nil)

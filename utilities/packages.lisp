@@ -35,3 +35,10 @@
         :com.hon.utils.test
         :com.hon.utils.byte)
   (:export compute-hmac-sha256))
+
+(defpackage :com.hon.utils.crypto.pbkdf2
+  (:use :common-lisp
+        :com.hon.utils.logging
+        :com.hon.utils.test
+        :com.hon.utils.byte)
+  (:export compute-pbkdf2-hmac-sha256))

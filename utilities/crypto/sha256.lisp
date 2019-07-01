@@ -1,3 +1,5 @@
+;;;; https://tools.ietf.org/html/rfc6234
+
 (in-package :com.hon.utils.crypto.sha256)
 
 (set-package-log-level nil)
