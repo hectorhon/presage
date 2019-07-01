@@ -8,62 +8,92 @@
   (require :sb-rotate-byte))
 
 (defun mod32+ (&rest xs)
-  (reduce (lambda (a b) (ldb (byte 32 0) (+ a b))) xs))
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (reduce (lambda (a b)
+            (declare (type (unsigned-byte 32) a b))
+            (ldb (byte 32 0) (+ a b)))
+          xs))
 
 (defun shr32 (n x)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (declare (type (integer 0 32) n))
+  (declare (type (unsigned-byte 32) x))
   (ash x (- n)))
 
 (defun rotr32 (n x)
-  (sb-rotate-byte:rotate-byte (- 32 n) (byte 32 0) x))
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (declare (type fixnum n))
+  (declare (type (unsigned-byte 32) x))
+  (sb-rotate-byte:rotate-byte
+   (the (integer 0 31) (- 32 n))
+   (byte 32 0) x))
 
 (defun rotl32 (n x)
-  (sb-rotate-byte:rotate-byte n (byte 32 0) x))
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (declare (type fixnum n))
+  (declare (type (unsigned-byte 32) x))
+  (sb-rotate-byte:rotate-byte
+   (the (integer -31 0) n)
+   (byte 32 0) x))
 
 (defun pad-message (bytes)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (declare (type vector bytes))
   (let* ((original-length (length bytes))
          (final-length (* 64 (ceiling (+ original-length
                                          1  ; the #x80 byte
                                          8) ; the message length at the end
                                       64))))
+    (the (integer 0 576460752303423487) original-length)
+    (the fixnum final-length)
     (adjust-array bytes final-length :fill-pointer original-length)
     (vector-push #b10000000 bytes)
     (loop :for i :from 0 :below (- final-length original-length 1 8)
        :do (vector-push 0 bytes))
     (loop :for byte
-       :across (integer-to-bytes (* 8 original-length) 64)
+       :across (the (simple-array (unsigned-byte 8))
+                    (integer-to-bytes (the fixnum (* 8 original-length)) 64))
        :do (vector-push byte bytes))
     bytes))
 
 (defun ch (x y z)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (declare (type (unsigned-byte 32) x y z))
   (logxor (logand x y)
           (logand (lognot x) z)))
 
 (defun maj (x y z)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (declare (type (unsigned-byte 32) x y z))
   (logxor (logand x y)
           (logand x z)
           (logand y z)))
 
 (defun bsig0 (x)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
   (logxor (rotr32 2 x)
           (rotr32 13 x)
           (rotr32 22 x)))
 
 (defun bsig1 (x)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
   (logxor (rotr32 6 x)
           (rotr32 11 x)
           (rotr32 25 x)))
 
 (defun ssig0 (x)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
   (logxor (rotr32 7 x)
           (rotr32 18 x)
           (shr32 3 x)))
 
 (defun ssig1 (x)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
   (logxor (rotr32 17 x)
           (rotr32 19 x)
           (shr32 10 x)))
 
-(defvar constants
+(defparameter constants
   #(#x428a2f98 #x71374491 #xb5c0fbcf #xe9b5dba5
     #x3956c25b #x59f111f1 #x923f82a4 #xab1c5ed5
     #xd807aa98 #x12835b01 #x243185be #x550c7dc3
@@ -82,6 +112,9 @@
     #x90befffa #xa4506ceb #xbef9a3f7 #xc67178f2))
 
 (defun compute-hash (bytes)
+  (declare (optimize (speed 3) (safety 0) (debug 0)))
+  (declare (type (vector (unsigned-byte 8)) bytes))
+  (declare (type (simple-vector 64) constants))
   (let* ((bytes (pad-message (make-array (length bytes)
                                          :adjustable t
                                          :fill-pointer t
@@ -98,16 +131,16 @@
                                    #x5be0cd19))))
     (loop :initially (log-debug "Initial hash value:")
        :for value :across hash-value
-       :for index :upfrom 0
+       :for index fixnum :upfrom 0
        :do (log-debug "H[~d] = ~8,'0x" index value)
        :finally (log-debug ""))
-    (loop :for i :from 1 :to num-blocks
+    (loop :for i fixnum :from 1 :to num-blocks
        :do (let ((message-block (subseq bytes (* (1- i) 64) (* i 64)))
                  (message-schedule (make-array 64))
                  (a) (b) (c) (d) (e) (f) (g) (h) (t1) (t2))
              (loop :initially (log-debug "Block contents:")
                 :for i :from 0 :below 64 :by 4
-                :for n :from 0
+                :for n fixnum :from 0
                 :do (log-debug "W[~d] = ~2,'0x~2,'0x~2,'0x~2,'0x" n
                                (aref message-block (+ i 0))
                                (aref message-block (+ i 1))
@@ -173,10 +206,12 @@
                                      (integer-to-bytes (aref hash-value 6) 32)
                                      (integer-to-bytes (aref hash-value 7) 32))))))
 
-(check-equals "Hash for one block message sample"
+(check-equals "SHA256 Hash for one block message sample"
               (integer-to-bytes #xBA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD (* 32 8))
-              (compute-hash (map 'vector #'char-code "abc")))
+              (compute-hash (coerce (map 'vector #'char-code "abc")
+                                    '(vector (unsigned-byte 8)))))
 
-(check-equals "Hash for two block message sample"
+(check-equals "SHA256 Hash for two block message sample"
               (integer-to-bytes #x248D6A61D20638B8E5C026930C3E6039A33CE45964FF2167F6ECEDD419DB06C1 (* 32 8))
-              (compute-hash (map 'vector #'char-code "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")))
+              (compute-hash (coerce (map 'vector #'char-code "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")
+                                    '(vector (unsigned-byte 8)))))

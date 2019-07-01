@@ -50,3 +50,9 @@
   (compute-pbkdf2-hmac-sha256 (map 'vector #'char-code "Password")
                               (map 'vector #'char-code "NaCl")
                               iterations 64))
+
+;; (progn (sb-profile:profile com.hon.utils.crypto.sha256:compute-hash
+;;                            com.hon.utils.crypto.hmac:compute-hmac-sha256
+;;                            com.hon.utils.crypto.pbkdf2:compute-pbkdf2-hmac-sha256)
+;;        (time (com.hon.utils.crypto.pbkdf2::test 3000))
+;;        (sb-profile:report))

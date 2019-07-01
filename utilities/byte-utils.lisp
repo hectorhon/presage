@@ -2,7 +2,7 @@
 
 (defun integer-to-bytes (integer bits)
   (loop :with byte-count = (/ bits 8)
-     :with arr = (make-array byte-count :element-type 'unsigned-byte)
+     :with arr = (make-array byte-count :element-type '(unsigned-byte 8))
      :for i :from 0 :below byte-count
      :do (setf (aref arr i)
                (ldb (byte 8 (* (- (1- byte-count) i) 8)) integer))
