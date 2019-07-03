@@ -4,12 +4,23 @@
 
 (set-package-log-level nil)
 
+(declaim (ftype (function (function
+                           fixnum
+                           (simple-array (unsigned-byte 8))
+                           (simple-array (unsigned-byte 8)))
+                          (values (simple-array (unsigned-byte 8)) &optional))
+                compute-mac))
+
 (defun compute-mac (hash-function block-size secret-key text)
-  (let* ((ipad (make-array block-size :initial-element #x36))
-         (opad (make-array block-size :initial-element #x5c))
-         (step-1-output (let ((secret-key (if (> (length secret-key) block-size)
-                                              (funcall hash-function secret-key)
-                                              secret-key)))
+  (declare (optimize (speed 3) (safety 3) (debug 0)))
+  (declare (type (simple-array (unsigned-byte 8)) text secret-key))
+  (declare (type function hash-function))
+  (let* ((ipad (make-array block-size :element-type '(unsigned-byte 8) :initial-element #x36))
+         (opad (make-array block-size :element-type '(unsigned-byte 8) :initial-element #x5c))
+         (step-1-output (let ((secret-key (the (simple-array (unsigned-byte 8))
+                                               (if (> (length secret-key) block-size)
+                                                   (funcall hash-function secret-key)
+                                                   secret-key))))
                           (concatenate '(vector (unsigned-byte 8))
                                        secret-key
                                        (make-array (- block-size (length secret-key))
@@ -29,6 +40,8 @@
     step-7-output))
 
 (defun compute-hmac-sha256 (secret-key text)
+  (declare (optimize (speed 3) (safety 3) (debug 0)))
+  (declare (type (simple-array (unsigned-byte 8)) text secret-key))
   (compute-mac #'com.hon.utils.crypto.sha256:compute-hash 64 secret-key text))
 
 (check-equals "HMAC-SHA256 Sample message for keylen=blocklen"

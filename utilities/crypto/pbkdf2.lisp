@@ -4,29 +4,39 @@
 
 (set-package-log-level nil)
 
+(declaim (type (function ((simple-array (unsigned-byte 8))
+                          (simple-array (unsigned-byte 8)))
+                         (values (simple-array (unsigned-byte 8)) &optional))
+               *prf*))
+
 (defvar *prf*)
 
 (defun F (P S c i)
-  (loop :with arr = (funcall *prf* P (concatenate 'vector S (integer-to-bytes i 32)))
-     :for index :from 1 :to (1- c)
+  (declare (optimize (speed 3) (safety 3) (debug 0)))
+  (declare (type fixnum c))
+  (loop :with arr = (funcall *prf* P (concatenate '(vector (unsigned-byte 8)) S (integer-to-bytes i 32)))
+     :for index fixnum :from 1 :to (1- c)
      :do (map-into arr #'logxor (funcall *prf* P arr))
      :finally (return arr)))
 
 (defun compute-kdf (password salt iteration-count intended-derived-key-length prf-output-length)
-  (let ((P password)
-        (S salt)
-        (c iteration-count)
-        (dkLen intended-derived-key-length)
-        (hLen prf-output-length))
-    (if (> dkLen (* (1- (expt 2 32)) hLen))
+  (declare (optimize (speed 3) (safety 3) (debug 0)))
+  (let ((P (the (simple-array (unsigned-byte 8)) password))
+        (S (the (simple-array (unsigned-byte 8)) salt))
+        (c (the fixnum iteration-count))
+        (dkLen (the fixnum intended-derived-key-length))
+        (hLen (the (integer 0 512) prf-output-length))) ; arbitrary
+    (if (> dkLen (the fixnum (* (the (integer 0 4294967296) (1- (expt 2 32)))
+                                hLen)))
         (error "intended-derived-key-length too long"))
     (multiple-value-bind (l r*) (ceiling dkLen hLen)
       (let ((r (+ hLen r*)))
         (declare (ignore r))
-        (apply #'concatenate 'vector (loop :for index :from 1 :to l
+        (apply #'concatenate 'vector (loop :for index :from 1 :to (the fixnum l)
                                         :collect (F P S c index)))))))
 
 (defun compute-pbkdf2-hmac-sha256 (password salt iteration-count &optional (intended-derived-key-length 32))
+  (declare (optimize (speed 3) (safety 3) (debug 0)))
   (let ((*prf* #'com.hon.utils.crypto.hmac:compute-hmac-sha256))
     (compute-kdf password salt iteration-count intended-derived-key-length 32)))
 
@@ -47,8 +57,10 @@
 ;;                                           100 64))
 
 (defun test (iterations)
-  (compute-pbkdf2-hmac-sha256 (map 'vector #'char-code "Password")
-                              (map 'vector #'char-code "NaCl")
+  (compute-pbkdf2-hmac-sha256 (coerce (map 'vector #'char-code "Password")
+                                      '(vector (unsigned-byte 8)))
+                              (coerce (map 'vector #'char-code "NaCl")
+                                      '(vector (unsigned-byte 8)))
                               iterations 64))
 
 ;; (progn (sb-profile:profile com.hon.utils.crypto.sha256:compute-hash
