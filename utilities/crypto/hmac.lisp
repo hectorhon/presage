@@ -4,20 +4,19 @@
 
 (set-package-log-level nil)
 
-(declaim (ftype (function (function
-                           fixnum
-                           (simple-array (unsigned-byte 8))
-                           (simple-array (unsigned-byte 8)))
-                          (values (simple-array (unsigned-byte 8)) &optional))
-                compute-mac))
+;; (declaim (ftype (function (function
+;;                            fixnum
+;;                            (simple-array (unsigned-byte 8))
+;;                            (simple-array (unsigned-byte 8)))
+;;                           (values (simple-array (unsigned-byte 8)) &optional))
+;;                 compute-mac))
 
 (defun compute-mac (hash-function block-size secret-key text)
   (declare (optimize (speed 3) (safety 3) (debug 0)))
-  (declare (type (simple-array (unsigned-byte 8)) text secret-key))
   (declare (type function hash-function))
-  (let* ((ipad (make-array block-size :element-type '(unsigned-byte 8) :initial-element #x36))
-         (opad (make-array block-size :element-type '(unsigned-byte 8) :initial-element #x5c))
-         (step-1-output (let ((secret-key (the (simple-array (unsigned-byte 8))
+  (declare (type fixnum block-size))
+  (declare (type (simple-array (unsigned-byte 8)) text secret-key))
+  (let* ((step-1-output (let ((secret-key (the (simple-array (unsigned-byte 8))
                                                (if (> (length secret-key) block-size)
                                                    (funcall hash-function secret-key)
                                                    secret-key))))
@@ -26,10 +25,10 @@
                                        (make-array (- block-size (length secret-key))
                                                    :element-type '(unsigned-byte 8)
                                                    :initial-element 0))))
-         (step-2-output (map 'vector #'logxor step-1-output ipad))
+         (step-2-output (map '(vector (unsigned-byte 8)) (lambda (byte) (logxor #x36 byte)) step-1-output))
          (step-3-output (concatenate '(vector (unsigned-byte 8)) step-2-output text))
          (step-4-output (funcall hash-function step-3-output))
-         (step-5-output (map 'vector #'logxor step-1-output opad))
+         (step-5-output (map '(vector (unsigned-byte 8)) (lambda (byte) (logxor #x5c byte)) step-1-output))
          (step-6-output (concatenate '(vector (unsigned-byte 8)) step-5-output step-4-output))
          (step-7-output (funcall hash-function step-6-output)))
     (log-debug "K0 is~%~a" (bytes-to-hex-string step-1-output))
