@@ -17,11 +17,11 @@
   ;;           (declare (type (unsigned-byte 32) a b))
   ;;           (ldb (byte 32 0) (+ a b)))
   ;;         xs :initial-value (the (unsigned-byte 32) 0)))
-  (let ((acc (the (unsigned-byte 32) 0)))
-    (loop :for x :in xs
-       :do (setf acc (ldb (byte 32 0)
-                          (+ acc (the (unsigned-byte 32) x)))))
-    acc))
+  (loop :with acc :of-type (unsigned-byte 32) = 0
+     :for x :in xs
+     :do (setf acc (ldb (byte 32 0)
+                        (+ acc (the (unsigned-byte 32) x))))
+     :finally (return acc)))
 
 (defun shr32 (n x)
   (declare (optimize (speed 3) (safety 3) (debug 0)))
@@ -71,7 +71,8 @@
        :from (- final-length 8)
        :below final-length
        :for byte
-       :across (integer-to-bytes (the fixnum (* 8 original-length)) 64)
+       :across (the (simple-array (unsigned-byte 8))
+                    (integer-64-to-bytes (the fixnum (* 8 original-length))))
        :do (setf (aref padded-message index) byte))
     padded-message))
 
@@ -141,10 +142,9 @@
                            #x748f82ee #x78a5636f #x84c87814 #x8cc70208
                            #x90befffa #xa4506ceb #xbef9a3f7 #xc67178f2))))
 
-;; (declaim (ftype (function ((simple-array (unsigned-byte 8)))
-;;                           (values (simple-array (unsigned-byte 8)) &optional))
-;;                 compute-hash))
-
+;; (let ((a 0) (b 0) (c 0) (d 0) (e 0) (f 0) (g 0) (h 0) (t1 0) (t2 0))
+;;   (declare (type (unsigned-byte 32) a b c d e f g h t1 t2))
+;;   (declare (dynamic-extent a b c d e f g h t1 t2))
 (defun compute-hash (bytes)
   (declare (optimize (speed 3) (safety 3) (debug 0)))
   (declare (type (simple-array (unsigned-byte 8)) bytes))
@@ -162,15 +162,17 @@
          (message-schedule
           (the (simple-array (unsigned-byte 32))
                (make-array 64 :element-type '(unsigned-byte 32))))
-         (a) (b) (c) (d) (e) (f) (g) (h) (t1) (t2))
+         (a) (b) (c) (d) (e) (f) (g) (h)
+         (t1) (t2)
+         )
     (loop :initially (log-debug "Initial hash value:")
        :for value :across hash-value
        :for index fixnum :upfrom 0
        :do (log-debug "H[~d] = ~8,'0x" index value)
        :finally (log-debug ""))
     (loop :for i fixnum :from 1 :to num-blocks
-       :do (let ((message-block
-                  (subseq bytes (* (1- i) 64) (* i 64))))
+       :for message-block = (subseq bytes (* (1- i) 64) (* i 64))
+       :do (progn
              (loop :initially (log-debug "Block contents:")
                 :for i :from 0 :below 64 :by 4
                 :for n fixnum :from 0
@@ -184,7 +186,7 @@
              (loop :for tt :from 0 :to 15
                 :do (let ((rhs (subseq message-block (* 4 tt) (* 4 (1+ tt)))))
                       (setf (aref message-schedule tt)
-                            (bytes-to-integer rhs))))
+                            (bytes-to-integer-32 rhs))))
              (loop :for tt :from 16 :to 63
                 :do (let ((rhs (mod32+ (ssig1 (aref message-schedule (- tt 2)))
                                        (aref message-schedule (- tt 7))
@@ -229,13 +231,14 @@
              (setf (aref hash-value 5) (mod32+ f (aref hash-value 5)))
              (setf (aref hash-value 6) (mod32+ g (aref hash-value 6)))
              (setf (aref hash-value 7) (mod32+ h (aref hash-value 7))))
-       :finally (return (let ((arr (make-array 32 :element-type '(unsigned-byte 8))))
-                          (loop :for hash-value-part :across hash-value
-                             :for index fixnum :from 0
-                             :do (loop :for byte :across (integer-to-bytes hash-value-part 32)
-                                    :for destination-index fixnum :from (* index 4)
-                                    :do (setf (aref arr destination-index) byte)))
-                          (the (simple-array (unsigned-byte 8)) arr))))))
+       :finally (return (loop :with arr = (make-array 32 :element-type '(unsigned-byte 8))
+                           :for hash-value-part :across hash-value
+                           :for index fixnum :from 0
+                           :do (loop :for byte :across (the (simple-array (unsigned-byte 8))
+                                                            (integer-32-to-bytes hash-value-part))
+                                  :for destination-index fixnum :from (* index 4)
+                                  :do (setf (aref arr destination-index) byte))
+                           :finally (return arr))))))
 
 (check-equals "SHA256 Hash for one block message sample"
               (integer-to-bytes #xBA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD (* 32 8))
@@ -246,3 +249,23 @@
               (integer-to-bytes #x248D6A61D20638B8E5C026930C3E6039A33CE45964FF2167F6ECEDD419DB06C1 (* 32 8))
               (compute-hash (coerce (map 'vector #'char-code "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")
                                     '(vector (unsigned-byte 8)))))
+
+;; (progn (sb-profile:profile com.hon.utils.crypto.sha256:compute-hash
+;;                                     com.hon.utils.crypto.sha256::mod32+
+;;                                     com.hon.utils.crypto.sha256::shr32
+;;                                     com.hon.utils.crypto.sha256::rotr32
+;;                                     com.hon.utils.crypto.sha256::rotl32
+;;                                     com.hon.utils.crypto.sha256::pad-message
+;;                                     com.hon.utils.crypto.sha256::ch
+;;                                     com.hon.utils.crypto.sha256::maj
+;;                                     com.hon.utils.crypto.sha256::bsig0
+;;                                     com.hon.utils.crypto.sha256::ssig0
+;;                                     com.hon.utils.crypto.sha256::ssig1
+;;                                     com.hon.utils.byte:integer-32-to-bytes
+;;                                     com.hon.utils.byte:integer-64-to-bytes
+;;                                     com.hon.utils.byte:bytes-to-integer-32
+;;                                     ;; com.hon.utils.crypto.hmac::compute-mac
+;;                                     ;; com.hon.utils.crypto.pbkdf2::compute-kdf
+;;                                     )
+;;                 (time (com.hon.utils.crypto.pbkdf2::test 80000))
+;;                 (sb-profile:report))

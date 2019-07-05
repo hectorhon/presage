@@ -19,7 +19,10 @@
   (:use :common-lisp
         :com.hon.utils.test)
   (:export integer-to-bytes
+           integer-64-to-bytes
+           integer-32-to-bytes
            bytes-to-integer
+           bytes-to-integer-32
            bytes-to-hex-string))
 
 (defpackage :com.hon.utils.crypto.sha256
