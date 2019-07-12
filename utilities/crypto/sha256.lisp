@@ -122,30 +122,143 @@
 (defconstant +constants+
   (if (boundp '+constants+)
       (symbol-value '+constants+)
-      (make-array
-       64
-       :element-type '(unsigned-byte 32)
-       :initial-contents #(#x428a2f98 #x71374491 #xb5c0fbcf #xe9b5dba5
-                           #x3956c25b #x59f111f1 #x923f82a4 #xab1c5ed5
-                           #xd807aa98 #x12835b01 #x243185be #x550c7dc3
-                           #x72be5d74 #x80deb1fe #x9bdc06a7 #xc19bf174
-                           #xe49b69c1 #xefbe4786 #x0fc19dc6 #x240ca1cc
-                           #x2de92c6f #x4a7484aa #x5cb0a9dc #x76f988da
-                           #x983e5152 #xa831c66d #xb00327c8 #xbf597fc7
-                           #xc6e00bf3 #xd5a79147 #x06ca6351 #x14292967
-                           #x27b70a85 #x2e1b2138 #x4d2c6dfc #x53380d13
-                           #x650a7354 #x766a0abb #x81c2c92e #x92722c85
-                           #xa2bfe8a1 #xa81a664b #xc24b8b70 #xc76c51a3
-                           #xd192e819 #xd6990624 #xf40e3585 #x106aa070
-                           #x19a4c116 #x1e376c08 #x2748774c #x34b0bcb5
-                           #x391c0cb3 #x4ed8aa4a #x5b9cca4f #x682e6ff3
-                           #x748f82ee #x78a5636f #x84c87814 #x8cc70208
-                           #x90befffa #xa4506ceb #xbef9a3f7 #xc67178f2))))
+      (make-array 64
+                  :element-type '(unsigned-byte 32)
+                  :initial-contents
+                  #(#x428a2f98 #x71374491 #xb5c0fbcf #xe9b5dba5
+                    #x3956c25b #x59f111f1 #x923f82a4 #xab1c5ed5
+                    #xd807aa98 #x12835b01 #x243185be #x550c7dc3
+                    #x72be5d74 #x80deb1fe #x9bdc06a7 #xc19bf174
+                    #xe49b69c1 #xefbe4786 #x0fc19dc6 #x240ca1cc
+                    #x2de92c6f #x4a7484aa #x5cb0a9dc #x76f988da
+                    #x983e5152 #xa831c66d #xb00327c8 #xbf597fc7
+                    #xc6e00bf3 #xd5a79147 #x06ca6351 #x14292967
+                    #x27b70a85 #x2e1b2138 #x4d2c6dfc #x53380d13
+                    #x650a7354 #x766a0abb #x81c2c92e #x92722c85
+                    #xa2bfe8a1 #xa81a664b #xc24b8b70 #xc76c51a3
+                    #xd192e819 #xd6990624 #xf40e3585 #x106aa070
+                    #x19a4c116 #x1e376c08 #x2748774c #x34b0bcb5
+                    #x391c0cb3 #x4ed8aa4a #x5b9cca4f #x682e6ff3
+                    #x748f82ee #x78a5636f #x84c87814 #x8cc70208
+                    #x90befffa #xa4506ceb #xbef9a3f7 #xc67178f2))))
 
-;; (let ((a 0) (b 0) (c 0) (d 0) (e 0) (f 0) (g 0) (h 0) (t1 0) (t2 0))
-;;   (declare (type (unsigned-byte 32) a b c d e f g h t1 t2))
-;;   (declare (dynamic-extent a b c d e f g h t1 t2))
-(defun compute-hash (bytes)
+(defconstant +initial-hash-value+
+  (if (boundp '+initial-hash-value+)
+      (symbol-value '+initial-hash-value+)
+      (make-array 8
+                  :element-type '(unsigned-byte 32)
+                  :initial-contents
+                  #(#x6a09e667 #xbb67ae85 #x3c6ef372 #xa54ff53a
+                    #x510e527f #x9b05688c #x1f83d9ab #x5be0cd19))))
+
+(let ((message-schedule (make-array 64 :element-type '(unsigned-byte 32)))
+      (a 0) (b 0) (c 0) (d 0) (e 0) (f 0) (g 0) (h 0)
+      (hash-value (make-array 8 :element-type '(unsigned-byte 32)))
+      (t1 0) (t2 0)
+      (message-block (make-array 64 :element-type '(unsigned-byte 8))))
+  (declare (type (unsigned-byte 32) a b c d e f g h t1 t2))
+  (defun compute-hash (message-bytes)
+    (declare (optimize (speed 3) (safety 3) (debug 0)))
+    (declare (type (simple-array (unsigned-byte 8)) message-bytes))
+    (map-into hash-value #'identity +initial-hash-value+) ; Initialize the hash-value
+    (let ((original-message-length (the (integer 0 512) (length message-bytes)))
+          (message-bytes-index 0)
+          (1-appended-p nil))
+      (declare (type fixnum message-bytes-index))
+      (flet ((get-next-message-block () ; returns t if it should be called again
+               (if (< (+ 64 message-bytes-index) original-message-length)
+                   ;; Enough bytes - copy whole 64 bytes into message-block
+                   (progn (loop :for source-index :from message-bytes-index
+                             :for destination-index :from 0 :below 64
+                             :do (setf (aref message-block destination-index)
+                                       (aref message-bytes source-index))
+                             :finally (incf message-bytes-index 64))
+                          t)
+                   ;; Not enough bytes - copy remaining bytes and apply padding
+                   (let ((destination-index 0))
+                     (loop :for source-index :of-type (integer 0 4611686018427387839)
+                        :from message-bytes-index :below original-message-length
+                        :do (setf (aref message-block destination-index)
+                                  (aref message-bytes source-index))
+                        :do (incf destination-index)
+                        :finally (setf message-bytes-index original-message-length))
+                     (unless 1-appended-p
+                       (setf (aref message-block destination-index) #x80)
+                       (incf destination-index)
+                       (setf 1-appended-p t))
+                     (if (>= destination-index 56)
+                         (progn (loop :until (eql 64 destination-index)
+                                   :do (setf (aref message-block destination-index) #x00)
+                                   :do (incf destination-index))
+                                t)
+                         (progn (loop :until (eql 56 destination-index)
+                                   :do (setf (aref message-block destination-index) #x00)
+                                   :do (incf destination-index))
+                                (loop :for byte :across (the (simple-array (unsigned-byte 8))
+                                                             (integer-64-to-bytes (* 8 original-message-length)))
+                                   :do (setf (aref message-block destination-index) byte)
+                                   :do (incf destination-index))
+                                nil)))))
+             (prepare-message-schedule ()
+               (loop :for tt :from 0 :to 15
+                  :do (let ((rhs (subseq message-block (* 4 tt) (* 4 (1+ tt)))))
+                        (setf (aref message-schedule tt)
+                              (bytes-to-integer-32 rhs))))
+               (loop :for tt :from 16 :to 63
+                  :do (let ((rhs (mod32+ (ssig1 (aref message-schedule (- tt 2)))
+                                         (aref message-schedule (- tt 7))
+                                         (ssig0 (aref message-schedule (- tt 15)))
+                                         (aref message-schedule (- tt 16)))))
+                        (setf (aref message-schedule tt) rhs))))
+             (initialize-working-variables ()
+               (setf a (aref hash-value 0)) (setf b (aref hash-value 1))
+               (setf c (aref hash-value 2)) (setf d (aref hash-value 3))
+               (setf e (aref hash-value 4)) (setf f (aref hash-value 5))
+               (setf g (aref hash-value 6)) (setf h (aref hash-value 7)))
+             (perform-main-hash-computation ()
+               (loop :for tt :from 0 :to 63
+                  :do (progn (setf t1 (mod32+ h
+                                              (bsig1 e)
+                                              (ch e f g)
+                                              (aref +constants+ tt)
+                                              (aref message-schedule tt)))
+                             (setf t2 (mod32+ (bsig0 a)
+                                              (maj a b c)))
+                             (setf h g)
+                             (setf g f)
+                             (setf f e)
+                             (setf e (mod32+ d t1))
+                             (setf d c)
+                             (setf c b)
+                             (setf b a)
+                             (setf a (mod32+ t1 t2)))))
+             (compute-intermediate-hash-value ()
+               (setf (aref hash-value 0) (mod32+ a (aref hash-value 0)))
+               (setf (aref hash-value 1) (mod32+ b (aref hash-value 1)))
+               (setf (aref hash-value 2) (mod32+ c (aref hash-value 2)))
+               (setf (aref hash-value 3) (mod32+ d (aref hash-value 3)))
+               (setf (aref hash-value 4) (mod32+ e (aref hash-value 4)))
+               (setf (aref hash-value 5) (mod32+ f (aref hash-value 5)))
+               (setf (aref hash-value 6) (mod32+ g (aref hash-value 6)))
+               (setf (aref hash-value 7) (mod32+ h (aref hash-value 7)))))
+        (loop :for has-next-block-p = (get-next-message-block)
+           ;; :do (print message-block)
+           ;; :until (not has-next-block-p))))))
+           :do (progn (prepare-message-schedule)
+                      (initialize-working-variables)
+                      (perform-main-hash-computation)
+                      (compute-intermediate-hash-value))
+           :until (not has-next-block-p)
+           :finally (return (loop :with arr = (make-array 32 :element-type '(unsigned-byte 8))
+                               :for hash-value-part :across hash-value
+                               :for index fixnum :from 0
+                               :do (loop :for byte :across (the (simple-array (unsigned-byte 8))
+                                                                (integer-32-to-bytes hash-value-part))
+                                      :for destination-index fixnum :from (* index 4)
+                                      :do (setf (aref arr destination-index) byte))
+                               :finally (return arr))))))))
+
+(defun compute-hash-x (bytes)
   (declare (optimize (speed 3) (safety 3) (debug 0)))
   (declare (type (simple-array (unsigned-byte 8)) bytes))
   (declare (type (simple-array (unsigned-byte 32)) +constants+))
@@ -165,6 +278,7 @@
          (a) (b) (c) (d) (e) (f) (g) (h)
          (t1) (t2)
          )
+    (declare (dynamic-extent hash-value message-schedule a b c d e f g h t1 t2))
     (loop :initially (log-debug "Initial hash value:")
        :for value :across hash-value
        :for index fixnum :upfrom 0
