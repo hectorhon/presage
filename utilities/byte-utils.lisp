@@ -2,6 +2,12 @@
 
 
 
+(declaim (inline integer-64-to-bytes
+                 integer-32-to-bytes
+                 bytes-to-integer-32))
+
+
+
 (defun integer-to-bytes (integer bits)
   (loop :with byte-count = (/ bits 8)
      :with arr = (make-array byte-count :element-type '(unsigned-byte 8))
