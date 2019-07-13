@@ -9,19 +9,17 @@
 
 (declaim (inline mod32+ shr32 rotr32 rotl32))
 
-(defun mod32+ (&rest xs)
+(defmacro mod32++ (&rest forms)
+  (case (length forms)
+    (0 0)
+    (1 (first forms))
+    (2 `(mod32+ ,(first forms) ,(second forms)))
+    (t `(mod32+ ,(first forms) (mod32++ ,@(cdr forms))))))
+
+(defun mod32+ (a b)
   (declare (optimize (speed 3) (safety 3) (debug 0)))
-  (declare (dynamic-extent xs))
-  ;; Too slow
-  ;; (reduce (lambda (a b)
-  ;;           (declare (type (unsigned-byte 32) a b))
-  ;;           (ldb (byte 32 0) (+ a b)))
-  ;;         xs :initial-value (the (unsigned-byte 32) 0)))
-  (loop :with acc :of-type (unsigned-byte 32) = 0
-     :for x :in xs
-     :do (setf acc (ldb (byte 32 0)
-                        (+ acc (the (unsigned-byte 32) x))))
-     :finally (return acc)))
+  (declare (type (unsigned-byte 32) a b))
+  (ldb (byte 32 0) (+ a b)))
 
 (defun shr32 (n x)
   (declare (optimize (speed 3) (safety 3) (debug 0)))
@@ -31,19 +29,15 @@
 
 (defun rotr32 (n x)
   (declare (optimize (speed 3) (safety 3) (debug 0)))
-  (declare (type fixnum n))
+  (declare (type (integer 1 31) n))
   (declare (type (unsigned-byte 32) x))
-  (sb-rotate-byte:rotate-byte
-   (the (integer 0 31) (- 32 n))
-   (byte 32 0) x))
+  (sb-rotate-byte:rotate-byte (- n) (byte 32 0) x))
 
 (defun rotl32 (n x)
   (declare (optimize (speed 3) (safety 3) (debug 0)))
-  (declare (type fixnum n))
+  (declare (type (integer 1 31) n))
   (declare (type (unsigned-byte 32) x))
-  (sb-rotate-byte:rotate-byte
-   (the (integer -31 0) n)
-   (byte 32 0) x))
+  (sb-rotate-byte:rotate-byte n (byte 32 0) x))
 
 (defun pad-message (bytes)
   "Returns the padded message in a new byte array."
@@ -205,10 +199,10 @@
                         (setf (aref message-schedule tt)
                               (bytes-to-integer-32 rhs))))
                (loop :for tt :from 16 :to 63
-                  :do (let ((rhs (mod32+ (ssig1 (aref message-schedule (- tt 2)))
-                                         (aref message-schedule (- tt 7))
-                                         (ssig0 (aref message-schedule (- tt 15)))
-                                         (aref message-schedule (- tt 16)))))
+                  :do (let ((rhs (mod32++ (ssig1 (aref message-schedule (- tt 2)))
+                                          (aref message-schedule (- tt 7))
+                                          (ssig0 (aref message-schedule (- tt 15)))
+                                          (aref message-schedule (- tt 16)))))
                         (setf (aref message-schedule tt) rhs))))
              (initialize-working-variables ()
                (setf a (aref hash-value 0)) (setf b (aref hash-value 1))
@@ -217,13 +211,13 @@
                (setf g (aref hash-value 6)) (setf h (aref hash-value 7)))
              (perform-main-hash-computation ()
                (loop :for tt :from 0 :to 63
-                  :do (progn (setf t1 (mod32+ h
-                                              (bsig1 e)
-                                              (ch e f g)
-                                              (aref +constants+ tt)
-                                              (aref message-schedule tt)))
-                             (setf t2 (mod32+ (bsig0 a)
-                                              (maj a b c)))
+                  :do (progn (setf t1 (mod32++ h
+                                               (bsig1 e)
+                                               (ch e f g)
+                                               (aref +constants+ tt)
+                                               (aref message-schedule tt)))
+                             (setf t2 (mod32++ (bsig0 a)
+                                               (maj a b c)))
                              (setf h g)
                              (setf g f)
                              (setf f e)
@@ -242,8 +236,6 @@
                (setf (aref hash-value 6) (mod32+ g (aref hash-value 6)))
                (setf (aref hash-value 7) (mod32+ h (aref hash-value 7)))))
         (loop :for has-next-block-p = (get-next-message-block)
-           ;; :do (print message-block)
-           ;; :until (not has-next-block-p))))))
            :do (progn (prepare-message-schedule)
                       (initialize-working-variables)
                       (perform-main-hash-computation)
@@ -302,10 +294,10 @@
                       (setf (aref message-schedule tt)
                             (bytes-to-integer-32 rhs))))
              (loop :for tt :from 16 :to 63
-                :do (let ((rhs (mod32+ (ssig1 (aref message-schedule (- tt 2)))
-                                       (aref message-schedule (- tt 7))
-                                       (ssig0 (aref message-schedule (- tt 15)))
-                                       (aref message-schedule (- tt 16)))))
+                :do (let ((rhs (mod32++ (ssig1 (aref message-schedule (- tt 2)))
+                                        (aref message-schedule (- tt 7))
+                                        (ssig0 (aref message-schedule (- tt 15)))
+                                        (aref message-schedule (- tt 16)))))
                       (setf (aref message-schedule tt) rhs)))
              ;; 2. Initialize the working variables
              (setf a (aref hash-value 0))
@@ -318,13 +310,13 @@
              (setf h (aref hash-value 7))
              ;; 3. Perform the main hash computation
              (loop :for tt :from 0 :to 63
-                :do (progn (setf t1 (mod32+ h
-                                            (bsig1 e)
-                                            (ch e f g)
-                                            (aref +constants+ tt)
-                                            (aref message-schedule tt)))
-                           (setf t2 (mod32+ (bsig0 a)
-                                            (maj a b c)))
+                :do (progn (setf t1 (mod32++ h
+                                             (bsig1 e)
+                                             (ch e f g)
+                                             (aref +constants+ tt)
+                                             (aref message-schedule tt)))
+                           (setf t2 (mod32++ (bsig0 a)
+                                             (maj a b c)))
                            (setf h g)
                            (setf g f)
                            (setf f e)
@@ -363,6 +355,14 @@
               (integer-to-bytes #x248D6A61D20638B8E5C026930C3E6039A33CE45964FF2167F6ECEDD419DB06C1 (* 32 8))
               (compute-hash (coerce (map 'vector #'char-code "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")
                                     '(vector (unsigned-byte 8)))))
+
+(defparameter *test-message*
+  (coerce (map 'vector #'char-code "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")
+          '(vector (unsigned-byte 8))))
+
+(defun test ()
+  (loop :for i :from 1 :to 80000
+     :do (compute-hash *test-message*)))
 
 ;; (progn (sb-profile:profile com.hon.utils.crypto.sha256:compute-hash
 ;;                                     com.hon.utils.crypto.sha256::mod32+

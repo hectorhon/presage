@@ -58,10 +58,10 @@
   (loop :for byte :across bytes
      :for pos :of-type (integer 0 3)
      :downfrom (1- (the (integer 0 4) (length bytes)))
-     :summing (the (unsigned-byte 32)
-                   (ash (the (unsigned-byte 32) byte)
-                        (* 8  pos)))
+     :summing (ldb (byte 32 0) (ash byte (* 8  pos)))
      :of-type (unsigned-byte 32)))
+
+
 
 (check-equals "bytes-to-integer-32"
               65537
