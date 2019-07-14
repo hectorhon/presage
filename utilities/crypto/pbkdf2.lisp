@@ -22,10 +22,9 @@
   (declare (optimize (speed 3) (space 0) (safety 3) (debug 0) (compilation-speed 0)))
   (declare (type (simple-array (unsigned-byte 8)) P S))
   (declare (type fixnum c i))
-  (let ((arr-0 (make-array *prf-output-length* :element-type '(unsigned-byte 8))) ; temp array
-        (U_index (make-array *prf-output-length* :element-type '(unsigned-byte 8)))
+  (let ((U_index (make-array *prf-output-length* :element-type '(unsigned-byte 8)))
         (result (make-array *prf-output-length* :element-type '(unsigned-byte 8))))
-    (declare (dynamic-extent arr-0 U_index))
+    (declare (dynamic-extent U_index))
     (funcall *prf* P
              (concatenate '(vector (unsigned-byte 8))
                           S
@@ -33,8 +32,7 @@
              U_index)
     (map-into result #'identity U_index)
     (loop :for index :from 2 :to c
-       :do (progn (funcall *prf* P U_index arr-0)
-                  (map-into U_index #'identity arr-0)
+       :do (progn (funcall *prf* P U_index U_index)
                   (loop :for i :from 0 :below *prf-output-length*
                      :do (setf (aref result i)
                                (logxor (aref result i)
