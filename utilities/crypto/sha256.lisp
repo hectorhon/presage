@@ -166,9 +166,12 @@
                            t))))
                (prepare-message-schedule ()
                  (loop :for tt :from 0 :to 15
-                    :do (let ((rhs (subseq message-block (* 4 tt) (* 4 (1+ tt)))))
-                          (setf (aref message-schedule tt)
-                                (bytes-to-integer-32 rhs))))
+                    :do (setf (aref message-schedule tt) 0))
+                 (loop :for byte :across message-block
+                    :for byte-index :of-type (integer 0 64) :from 0
+                    :do (multiple-value-bind (tt pos) (floor byte-index 4)
+                          (incf (aref message-schedule tt)
+                                (ash byte (* 8 (- 3 pos))))))
                  (loop :for tt :from 16 :to 63
                     :do (setf (aref message-schedule tt)
                               (mod32++ (ssig1 (aref message-schedule (- tt 2)))
