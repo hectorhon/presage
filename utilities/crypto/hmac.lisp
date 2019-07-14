@@ -4,44 +4,38 @@
 
 (set-package-log-level nil)
 
-;; (declaim (ftype (function (function
-;;                            fixnum
-;;                            (simple-array (unsigned-byte 8))
-;;                            (simple-array (unsigned-byte 8)))
-;;                           (values (simple-array (unsigned-byte 8)) &optional))
-;;                 compute-mac))
+(defmacro define-compute-hmac-function (function-name hash-function-name hash-output-length block-size)
+  `(let ((arr-1 (make-array ,block-size :element-type '(unsigned-byte 8)))
+         (arr-3 (make-array (+ ,block-size ,hash-output-length) :element-type '(unsigned-byte 8))))
+     (defun ,function-name (secret-key text)
+       (declare (optimize (speed 3) (safety 3) (debug 0)))
+       (declare (type (simple-array (unsigned-byte 8)) secret-key text))
+       (let ((arr-2 (make-array (+ ,block-size (length text)) :element-type '(unsigned-byte 8))))
+         (if (> (length secret-key) ,block-size)
+             (map-into arr-1 #'identity (,hash-function-name secret-key))
+             (let ((i 0))
+               (loop :for byte :across secret-key
+                  :do (setf (aref arr-1 i) byte)
+                  :do (incf i))
+               (loop :until (eql i ,block-size)
+                  :do (setf (aref arr-1 i) #x00)
+                  :do (incf i))))        ; K in arr-1
+         (loop :for i :from 0 :below ,block-size
+            :do (setf (aref arr-2 i)     ; K XOR ipad in arr-2 beginning
+                      (logxor #x36 (aref arr-1 i))))
+         (loop :for i :from 0 :below ,block-size
+            :do (setf (aref arr-3 i)     ; K XOR opad in arr-3 beginning
+                      (logxor #x5c (aref arr-1 i))))
+         (loop :for byte :across text    ; Fill up second half of arr-2
+            :for i :from ,block-size
+            :do (setf (aref arr-2 i) byte))
+         (loop :for byte :across (the (simple-array (unsigned-byte 8))
+                                      (,hash-function-name arr-2)) ; Fill up second half of arr-3
+            :for i :from ,block-size
+            :do (setf (aref arr-3 i) byte))
+         (,hash-function-name arr-3)))))
 
-(defun compute-mac (hash-function block-size secret-key text)
-  (declare (optimize (speed 3) (safety 3) (debug 0)))
-  (declare (type function hash-function))
-  (declare (type fixnum block-size))
-  (declare (type (simple-array (unsigned-byte 8)) text secret-key))
-  (let* ((step-1-output (let ((secret-key (the (simple-array (unsigned-byte 8))
-                                               (if (> (length secret-key) block-size)
-                                                   (funcall hash-function secret-key)
-                                                   secret-key))))
-                          (concatenate '(vector (unsigned-byte 8))
-                                       secret-key
-                                       (make-array (- block-size (length secret-key))
-                                                   :element-type '(unsigned-byte 8)
-                                                   :initial-element 0))))
-         (step-2-output (map '(vector (unsigned-byte 8)) (lambda (byte) (logxor #x36 byte)) step-1-output))
-         (step-3-output (concatenate '(vector (unsigned-byte 8)) step-2-output text))
-         (step-4-output (funcall hash-function step-3-output))
-         (step-5-output (map '(vector (unsigned-byte 8)) (lambda (byte) (logxor #x5c byte)) step-1-output))
-         (step-6-output (concatenate '(vector (unsigned-byte 8)) step-5-output step-4-output))
-         (step-7-output (funcall hash-function step-6-output)))
-    (log-debug "K0 is~%~a" (bytes-to-hex-string step-1-output))
-    (log-debug "K0^ipad is~%~a" (bytes-to-hex-string step-2-output))
-    (log-debug "Hash((Key^ipad)||text) is~%~a" (bytes-to-hex-string step-4-output))
-    (log-debug "K0 xor opad is~%~a" (bytes-to-hex-string step-5-output))
-    (log-debug "Hash((K0^opad)||Hash((K0^ipad)||text)) is~%~a" (bytes-to-hex-string step-7-output))
-    step-7-output))
-
-(defun compute-hmac-sha256 (secret-key text)
-  (declare (optimize (speed 3) (safety 3) (debug 0)))
-  (declare (type (simple-array (unsigned-byte 8)) text secret-key))
-  (compute-mac #'com.hon.utils.crypto.sha256:compute-hash 64 secret-key text))
+(define-compute-hmac-function compute-hmac-sha256 com.hon.utils.crypto.sha256:compute-hash 32 64)
 
 (check-equals "HMAC-SHA256 Sample message for keylen=blocklen"
               (integer-to-bytes #x8BB9A1DB9806F20DF7F77B82138C7914D174D59E13DC4D0169C9057B133E1D62 (* 32 8))
