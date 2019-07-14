@@ -5,11 +5,14 @@
 (set-package-log-level nil)
 
 (declaim (type (function ((simple-array (unsigned-byte 8))
+                          (simple-array (unsigned-byte 8))
                           (simple-array (unsigned-byte 8)))
                          (values (simple-array (unsigned-byte 8)) &optional))
                *prf*))
 
 (defvar *prf*)
+
+(declaim (type (integer 0 512) *prf-output-length*)) ; arbitrary
 
 (defvar *prf-output-length*)
 
@@ -19,15 +22,24 @@
   (declare (optimize (speed 3) (space 0) (safety 3) (debug 0) (compilation-speed 0)))
   (declare (type (simple-array (unsigned-byte 8)) P S))
   (declare (type fixnum c i))
-  (loop :with arr = (make-array *prf-output-length* :element-type '(unsigned-byte 32))
-     :for index fixnum :from 1 :to c
-     :for U_index = (funcall *prf* P (concatenate '(vector (unsigned-byte 8)) S (integer-to-bytes i 32)))
-     :then (funcall *prf* P U_index)
-     :do (loop :for index :from 0 :below (length arr)
-            :do (setf (aref arr index)
-                      (logxor (aref arr index)
-                              (aref U_index index))))
-     :finally (return arr)))
+  (let ((arr-0 (make-array *prf-output-length* :element-type '(unsigned-byte 8))) ; temp array
+        (U_index (make-array *prf-output-length* :element-type '(unsigned-byte 8)))
+        (result (make-array *prf-output-length* :element-type '(unsigned-byte 8))))
+    (declare (dynamic-extent arr-0 U_index))
+    (funcall *prf* P
+             (concatenate '(vector (unsigned-byte 8))
+                          S
+                          (integer-to-bytes i 32))
+             U_index)
+    (map-into result #'identity U_index)
+    (loop :for index :from 2 :to c
+       :do (progn (funcall *prf* P U_index arr-0)
+                  (map-into U_index #'identity arr-0)
+                  (loop :for i :from 0 :below *prf-output-length*
+                     :do (setf (aref result i)
+                               (logxor (aref result i)
+                                       (aref U_index i))))))
+    result))
 
 (defun compute-kdf (password salt iteration-count intended-derived-key-length)
   (declare (optimize (speed 3) (space 0) (safety 3) (debug 0) (compilation-speed 0)))
@@ -35,8 +47,7 @@
         (S (the (simple-array (unsigned-byte 8)) salt))
         (c (the fixnum iteration-count))
         (dkLen (the fixnum intended-derived-key-length))
-        (hLen (the (integer 0 512)        ; arbitrary
-                   *prf-output-length*)))
+        (hLen *prf-output-length*))
     (if (> dkLen (the fixnum (* (the (integer 0 4294967296) (1- (expt 2 32)))
                                 hLen)))
         (error "intended-derived-key-length too long"))
@@ -68,12 +79,13 @@
                                           80000 64))
 
 (defun test (iterations)
-  (print (bytes-to-hex-string
-          (compute-pbkdf2-hmac-sha256 (coerce (map 'vector #'char-code "Password")
-                                              '(vector (unsigned-byte 8)))
-                                      (coerce (map 'vector #'char-code "NaCl")
-                                              '(vector (unsigned-byte 8)))
-                                      iterations 64))))
+  ;; (print (bytes-to-hex-string
+  (compute-pbkdf2-hmac-sha256 (coerce (map 'vector #'char-code "Password")
+                                      '(vector (unsigned-byte 8)))
+                              (coerce (map 'vector #'char-code "NaCl")
+                                      '(vector (unsigned-byte 8)))
+                              iterations 64))
+;; ))
 
 ;; (progn (sb-profile:profile com.hon.utils.crypto.sha256:compute-hash
 ;;                            com.hon.utils.crypto.hmac:compute-hmac-sha256
