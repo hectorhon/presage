@@ -202,6 +202,10 @@
                     :do (setf (aref hash-value i)
                               (mod32+ (aref working-variables i)
                                       (aref hash-value i))))))
+          (declare (inline prepare-message-schedule
+                           initialize-working-variables
+                           perform-main-hash-computation
+                           compute-intermediate-hash-value))
           (loop :for has-next-block-p = (get-next-message-block)
              :do (progn (prepare-message-schedule)
                         (initialize-working-variables)
@@ -210,9 +214,9 @@
              :until (not has-next-block-p))
           (loop :for hash-value-part :across hash-value
              :for i :of-type (integer 0 7) :from 0
-             :do (loop :for byte :across (integer-32-to-bytes hash-value-part)
-                    :for j :of-type (integer 0 3) :from 0
-                    :do (setf (aref result (+ j (* i 4))) byte)))
+             :do (loop :for j :from 0 :below 4
+                    :do (setf (aref result (+ j (* i 4)))
+                              (ldb (byte 8 (* 8 (- 3 j))) hash-value-part))))
           result)))))
 
 (check-equals "SHA256 Hash for one block message sample"
