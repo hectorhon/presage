@@ -8,7 +8,7 @@
   `(let ((arr-1 (make-array ,block-size :element-type '(unsigned-byte 8)))
          (arr-3 (make-array (+ ,block-size ,hash-output-length) :element-type '(unsigned-byte 8))))
      (defun ,function-name (secret-key text)
-       (declare (optimize (speed 3) (safety 3) (debug 0)))
+       (declare (optimize (speed 3) (space 0) (safety 3) (debug 0) (compilation-speed 0)))
        (declare (type (simple-array (unsigned-byte 8)) secret-key text))
        (let ((arr-2 (make-array (+ ,block-size (length text)) :element-type '(unsigned-byte 8))))
          (if (> (length secret-key) ,block-size)

@@ -16,7 +16,7 @@
 (declaim (inline F))
 
 (defun F (P S c i)
-  (declare (optimize (speed 3) (safety 3) (debug 0)))
+  (declare (optimize (speed 3) (space 0) (safety 3) (debug 0) (compilation-speed 0)))
   (declare (type (simple-array (unsigned-byte 8)) P S))
   (declare (type fixnum c i))
   (loop :with arr = (make-array *prf-output-length* :element-type '(unsigned-byte 32))
@@ -30,7 +30,7 @@
      :finally (return arr)))
 
 (defun compute-kdf (password salt iteration-count intended-derived-key-length)
-  (declare (optimize (speed 3) (safety 3) (debug 0)))
+  (declare (optimize (speed 3) (space 0) (safety 3) (debug 0) (compilation-speed 0)))
   (let ((P (the (simple-array (unsigned-byte 8)) password))
         (S (the (simple-array (unsigned-byte 8)) salt))
         (c (the fixnum iteration-count))
@@ -46,7 +46,7 @@
                 :collect (F P S c index))))))
 
 (defun compute-pbkdf2-hmac-sha256 (password salt iteration-count &optional (intended-derived-key-length 32))
-  (declare (optimize (speed 3) (safety 3) (debug 0)))
+  (declare (optimize (speed 3) (space 0) (safety 3) (debug 0) (compilation-speed 0)))
   (let ((*prf* #'com.hon.utils.crypto.hmac:compute-hmac-sha256)
         (*prf-output-length* 32))
     (compute-kdf password salt iteration-count intended-derived-key-length)))
